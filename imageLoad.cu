@@ -18,5 +18,16 @@ void loadImageToGPU(const cv::Mat& img, ImageData& imgData) {
 
     size_t imageSize = img.total() * img.elemSize(); 
     CHECK_CUDA_ERROR(cudaMalloc(&imgData.d_image, imageSize));
+    if (imgData.d_image == nullptr) {
+        std::cerr << "Error: Memory allocation failed!" << std::endl;
+        return;  // exit or handle the error
+    }
+    if (img.data == nullptr) {
+        std::cerr << "Error: Image data is null!" << std::endl;
+        return;  // exit or handle the error
+    }
+    
     CHECK_CUDA_ERROR(cudaMemcpy(imgData.d_image, img.data, imageSize, cudaMemcpyHostToDevice));
+
+
 }

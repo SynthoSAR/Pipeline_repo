@@ -14,12 +14,17 @@
 }
 
 void saveImageFromGPU(const ImageData& imgData) {
-    size_t imageSize = imgData.width * imgData.height * imgData.channels * sizeof(unsigned char);
-    unsigned char* h_image = new unsigned char[imageSize];
-
-    CHECK_CUDA_ERROR(cudaMemcpy(h_image, imgData.d_image, imageSize, cudaMemcpyDeviceToHost));
-
-    cv::Mat img(imgData.height, imgData.width, (imgData.channels == 3) ? CV_8UC3 : CV_8UC1, h_image);
+    if (!imgData.denoised_ref) {
+        std::cerr << "Error: imgData.ref is null!" << std::endl;
+        return;
+    }
+    if (imgData.denoised_ref->empty()) {
+        std::cerr << "Error: GPU Mat is empty!" << std::endl;
+        return;
+    }
+    
+    cv::Mat img;
+    imgData.denoised_ref->download(img);
 
     if (!cv::imwrite(imgData.outputPath, img)) {
         std::cerr << "Failed to save the image to: " << imgData.outputPath << std::endl;
@@ -28,9 +33,6 @@ void saveImageFromGPU(const ImageData& imgData) {
 
     std::cout << "Image successfully saved to: " << imgData.outputPath << std::endl;
 
-    //std::this_thread::sleep_for(std::chrono::seconds(2));
-
-    delete[] h_image;
 }
 
 void freeGPUData(ImageData& imgData) {

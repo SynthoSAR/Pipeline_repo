@@ -4,7 +4,8 @@
 #include <opencv2/opencv.hpp>
 
 struct ImageData {
-    unsigned char* d_image = nullptr;
+    unsigned char* d_image = nullptr;       // Original image in GPU
+    cv::cuda::GpuMat* denoised_ref = nullptr;        // Denoised image reference in GPU
     int width = 0;
     int height = 0;
     int channels = 0;
