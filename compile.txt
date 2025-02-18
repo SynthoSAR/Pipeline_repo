@@ -1,0 +1,1 @@
+nvcc -o main main.cu imageLoad.cu imageSave.cu -I/usr/local/include/opencv4 -L/usr/local/lib -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_videoio -lopencv_imgproc -std=c++11
