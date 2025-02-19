@@ -14,30 +14,40 @@
 }
 
 void saveImageFromGPU(const ImageData& imgData) {
-    if (!imgData.denoised_ref) {
+    if (!imgData.rotation_ref) {
         std::cerr << "Error: imgData.ref is null!" << std::endl;
         return;
     }
-    if (imgData.denoised_ref->empty()) {
+    if (imgData.rotation_ref->empty()) {
         std::cerr << "Error: GPU Mat is empty!" << std::endl;
         return;
     }
     
     cv::Mat img;
-    imgData.denoised_ref->download(img);
-
+    imgData.rotation_ref->download(img);
+    
     if (!cv::imwrite(imgData.outputPath, img)) {
         std::cerr << "Failed to save the image to: " << imgData.outputPath << std::endl;
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Image successfully saved to: " << imgData.outputPath << std::endl;
-
 }
 
 void freeGPUData(ImageData& imgData) {
-    if (imgData.d_image) {
-        CHECK_CUDA_ERROR(cudaFree(imgData.d_image));
-        imgData.d_image = nullptr;
+    // Free GpuMat pointer
+    if (imgData.image_ref) {
+        delete imgData.image_ref;   
+        imgData.image_ref = nullptr;
+    }
+
+    if (imgData.denoised_ref) {
+        delete imgData.denoised_ref;
+        imgData.denoised_ref = nullptr;
+    }
+
+    if (imgData.rotation_ref) {
+        delete imgData.rotation_ref;
+        imgData.rotation_ref = nullptr;
     }
 }
+

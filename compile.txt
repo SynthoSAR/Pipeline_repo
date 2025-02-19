@@ -5,10 +5,10 @@ nvcc -o main main.cu imageLoad.cu imageSave.cu -I/usr/local/include/opencv4 -L/u
 
 
 
-nvcc -o main main.cu imageLoad.cu imageSave.cu noiseReduction.cu \
+nvcc -o main main.cu imageLoad.cu imageSave.cu noiseReduction.cu rotationCorrection.cu \
     -I/usr/local/include/opencv4 \
     -L/usr/local/lib \
     -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_videoio -lopencv_imgproc \
     -lopencv_cudaarithm -lopencv_cudaimgproc -lopencv_photo \
+    -lopencv_features2d -lopencv_calib3d -lopencv_cudawarping -lopencv_cudafeatures2d \
     -std=c++11
-

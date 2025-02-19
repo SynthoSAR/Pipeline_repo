@@ -2,6 +2,7 @@
 #include <iostream>
 #include <opencv2/opencv.hpp>
 #include <cuda_runtime.h>
+#include <opencv2/cudaimgproc.hpp>  // For cv::cuda::cvtColor
 
 #define CHECK_CUDA_ERROR(call) { \
     cudaError_t err = call; \
@@ -11,23 +12,13 @@
     } \
 }
 
-void loadImageToGPU(const cv::Mat& img, ImageData& imgData) {
-    imgData.width = img.cols;
-    imgData.height = img.rows;
-    imgData.channels = img.channels();
+void loadImageToGPU(const cv::Mat& imG, ImageData& imgData) {
 
-    size_t imageSize = img.total() * img.elemSize(); 
-    CHECK_CUDA_ERROR(cudaMalloc(&imgData.d_image, imageSize));
-    if (imgData.d_image == nullptr) {
-        std::cerr << "Error: Memory allocation failed!" << std::endl;
-        return;  // exit or handle the error
-    }
-    if (img.data == nullptr) {
-        std::cerr << "Error: Image data is null!" << std::endl;
-        return;  // exit or handle the error
-    }
+    cv::cuda::GpuMat* gpu_img = new cv::cuda::GpuMat();
+    gpu_img->upload(imG);   // Upload image to GPU
+
+    cv::cuda::cvtColor(*gpu_img, *gpu_img, cv::COLOR_BGR2GRAY); // Convert to grayscale on GPU
     
-    CHECK_CUDA_ERROR(cudaMemcpy(imgData.d_image, img.data, imageSize, cudaMemcpyHostToDevice));
-
-
+    imgData.image_ref = gpu_img;
+    
 }
