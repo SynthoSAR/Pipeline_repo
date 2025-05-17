@@ -4,9 +4,10 @@
 #include <opencv2/opencv.hpp>
 
 struct ImageData {
-    cv::cuda::GpuMat* image_ref = nullptr;        // Raw image reference in GPU
-    cv::cuda::GpuMat* denoised_ref = nullptr;        // Denoised image reference in GPU
-    cv::cuda::GpuMat* rotation_ref = nullptr;        // Rotation corrected image reference in GPU
+    cv::cuda::GpuMat* image_ref = nullptr;    // Original GPU image
+    cv::cuda::GpuMat* denoised_ref = nullptr; // Denoised GPU image
+    cv::cuda::GpuMat* rotation_ref = nullptr; // Rotated GPU image
+    cv::cuda::GpuMat* binary_ref = nullptr;   // Binarized GPU image 
     std::string outputPath;
 };
 

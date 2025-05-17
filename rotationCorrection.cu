@@ -59,24 +59,92 @@ void applyRotationCorrection(ImageData& imgData1, ImageData& imgData2) {
     }
 
     // Find Homography (CPU-based)
-    Mat H = findHomography(match_points2, match_points1, RANSAC);
+    //Mat H = findHomography(match_points2, match_points1, RANSAC);
 
     // Apply Homography using CUDA
-    cv::cuda::GpuMat gpu_aligned_img2;
-    cv::cuda::warpPerspective(gpu_img2, gpu_aligned_img2, H, gpu_img1.size());
+    //cv::cuda::GpuMat gpu_aligned_img2;
+    //cv::cuda::warpPerspective(gpu_img2, gpu_aligned_img2, H, gpu_img1.size());
 
     // Compute Intersection Mask
-    cv::cuda::GpuMat gpu_mask1, gpu_mask2, gpu_intersection_mask;
-    cv::cuda::threshold(gpu_img1, gpu_mask1, 1, 255, THRESH_BINARY);
-    cv::cuda::threshold(gpu_aligned_img2, gpu_mask2, 1, 255, THRESH_BINARY);
+    //cv::cuda::GpuMat gpu_mask1, gpu_mask2, gpu_intersection_mask;
+    //cv::cuda::threshold(gpu_img1, gpu_mask1, 1, 255, THRESH_BINARY);
+    //cv::cuda::threshold(gpu_aligned_img2, gpu_mask2, 1, 255, THRESH_BINARY);
 
     // Bitwise AND on GPU
-    cv::cuda::bitwise_and(gpu_mask1, gpu_mask2, gpu_intersection_mask);
+    //cv::cuda::bitwise_and(gpu_mask1, gpu_mask2, gpu_intersection_mask);
 
     // Extract common regions on GPU
-    cv::cuda::GpuMat gpu_common_img1, gpu_common_aligned_img2;
-    cv::cuda::bitwise_and(gpu_img1, gpu_img1, gpu_common_img1, gpu_intersection_mask);
-    cv::cuda::bitwise_and(gpu_aligned_img2, gpu_aligned_img2, gpu_common_aligned_img2,  gpu_intersection_mask);
+    //cv::cuda::GpuMat gpu_common_img1, gpu_common_aligned_img2;
+    //cv::cuda::bitwise_and(gpu_img1, gpu_img1, gpu_common_img1, gpu_intersection_mask);
+    //cv::cuda::bitwise_and(gpu_aligned_img2, gpu_aligned_img2, gpu_common_aligned_img2,  gpu_intersection_mask);
+    
+    
+    
+    
+    
+    
+    
+    
+    double angle_sum = 0.0;
+    int valid_pairs = 0;
+    for (size_t i = 0; i < match_points1.size(); ++i) {
+        // For each pair, compute the angle between vectors to the image center
+        Point2f p1 = match_points1[i];
+        Point2f p2 = match_points2[i];
+        Point2f center(gpu_img1.cols / 2.0f, gpu_img1.rows / 2.0f); // Image center
+
+        // Vectors from center to keypoints
+        Point2f v1 = p1 - center;
+        Point2f v2 = p2 - center;
+
+        // Compute angle using dot product and cross product
+        double dot = v1.x * v2.x + v1.y * v2.y;
+        double det = v1.x * v2.y - v1.y * v2.x;
+        double angle = atan2(det, dot) * 180.0 / CV_PI; // Convert to degrees
+
+        if (std::abs(angle) < 45.0) { // Filter outliers (arbitrary threshold)
+            angle_sum += angle;
+            valid_pairs++;
+        }
+    }
+
+    if (valid_pairs == 0) {
+        std::cerr << "Error: No valid rotation angle computed!" << std::endl;
+        imgData1.rotation_ref = new cv::cuda::GpuMat();
+        imgData2.rotation_ref = new cv::cuda::GpuMat();
+        gpu_img1.copyTo(*imgData1.rotation_ref);
+        gpu_img2.copyTo(*imgData2.rotation_ref);
+        return;
+    }
+
+    double rotation_angle = angle_sum / valid_pairs;
+    std::cout << "Computed rotation angle: " << rotation_angle << " degrees" << std::endl;
+
+    // Create rotation matrix (2x3 affine matrix)
+    Point2f center(gpu_img1.cols / 2.0f, gpu_img1.rows / 2.0f);
+    Mat rotation_matrix = getRotationMatrix2D(center, rotation_angle, 1.0); // Scale = 1.0 (no scaling)
+
+    // Apply rotation using CUDA
+    cv::cuda::GpuMat gpu_aligned_img2;
+    cv::cuda::warpAffine(gpu_img2, gpu_aligned_img2, rotation_matrix, gpu_img1.size());
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     imgData1.rotation_ref = new cv::cuda::GpuMat();
     imgData2.rotation_ref = new cv::cuda::GpuMat();
@@ -102,5 +170,8 @@ void applyRotationCorrection(ImageData& imgData1, ImageData& imgData2) {
     //Mat common_img1, common_aligned_img2;
     //gpu_common_img1.download(common_img1);
     //gpu_common_aligned_img2.download(common_aligned_img2);
+    
+    
+    
    
 }
