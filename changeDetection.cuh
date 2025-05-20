@@ -3,7 +3,7 @@
 
 #include "imageLoad.cuh"
 #include <opencv2/cudaarithm.hpp> // For cv::cuda::absdiff, bitwise_and, threshold
-
-void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageData& imgDataNext, cv::cuda::GpuMat& changeMask);
+void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageData& imgDataNext, 
+    cv::cuda::GpuMat& changeMask, cv::cuda::GpuMat& outputAnnotated);
 
 #endif // CHANGE_DETECTION_CUH

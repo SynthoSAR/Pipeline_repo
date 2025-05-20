@@ -12,10 +12,12 @@
     } \
 }
 
-void loadImageToGPU(const cv::Mat& imG, ImageData& imgData) {
+void loadImageToGPU(const cv::Mat& img, ImageData& imgData) {
+    // Store the original frame
+    imgData.original_frame = img.clone();
 
     cv::cuda::GpuMat* gpu_img = new cv::cuda::GpuMat();
-    gpu_img->upload(imG);   // Upload image to GPU
+    gpu_img->upload(img);   // Upload image to GPU
 
     cv::cuda::cvtColor(*gpu_img, *gpu_img, cv::COLOR_BGR2GRAY); // Convert to grayscale on GPU
     
