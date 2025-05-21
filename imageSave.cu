@@ -14,26 +14,17 @@
 }
 
 void saveImageFromGPU(const ImageData& imgData) {
-    if (!imgData.binary_ref) {
-        std::cerr << "Error: imgData.ref is null!" << std::endl;
-        exit(1);
-        return;
-    }
-    if (imgData.binary_ref->empty()) {
-        std::cerr << "Error: GPU Mat is empty!" << std::endl;
-        return;
+    if (imgData.annotated_ref &&  !imgData.annotated_ref->empty()) {
+        cv::Mat img;
+        imgData.annotated_ref->download(img);
+        
+        if (!cv::imwrite(imgData.outputPath, img)) {
+            std::cerr << "Failed to save the image to: " << imgData.outputPath << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        std::cerr << "No ERROR , Process Correctly" << std::endl;
     }
     
-    cv::Mat img;
-    imgData.binary_ref->download(img);
-    
-    if (!cv::imwrite(imgData.outputPath, img)) {
-        std::cerr << "Failed to save the image to: " << imgData.outputPath << std::endl;
-        exit(EXIT_FAILURE);
-    }
-    std::cerr << "No ERROR , Process Correctly" << std::endl;
-
-
 }
 
 void freeGPUData(ImageData& imgData) {
