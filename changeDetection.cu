@@ -1,146 +1,116 @@
 #include "changeDetection.cuh"
-#include <cuda_runtime.h>
-#include <opencv2/imgproc.hpp> // For CPU operations
-#include <opencv2/cudaarithm.hpp>
-#include <opencv2/cudafilters.hpp>
+#include <opencv2/cudaoptflow.hpp>
+#include <opencv2/cudaimgproc.hpp>
 
-void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageData& imgDataNext, cv::cuda::GpuMat& changeMask, cv::cuda::GpuMat& outputAnnotated) {
+void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageData& imgDataNext, 
+                         cv::cuda::GpuMat& changeMask, cv::cuda::GpuMat& outputAnnotated) {
+    // --- Input Validation ---
     if (imgDataPrev.binary_ref == nullptr || imgDataCurr.binary_ref == nullptr || imgDataNext.binary_ref == nullptr) {
-        std::cerr << "Error: One or more binary references are null!" << std::endl;
+        std::cerr << "Error: Binary references are null!" << std::endl;
         return;
     }
 
-    if (imgDataPrev.binary_ref->cols != imgDataCurr.binary_ref->cols || imgDataPrev.binary_ref->rows != imgDataCurr.binary_ref->rows ||
-        imgDataCurr.binary_ref->cols != imgDataNext.binary_ref->cols || imgDataCurr.binary_ref->rows != imgDataNext.binary_ref->rows) {
-        std::cerr << "Error: Images must have the same dimensions for change detection!" << std::endl;
+    if (imgDataPrev.binary_ref->size() != imgDataCurr.binary_ref->size() || 
+        imgDataCurr.binary_ref->size() != imgDataNext.binary_ref->size()) {
+        std::cerr << "Error: Image dimensions mismatch!" << std::endl;
         return;
     }
 
-    // Make copies of the GPU data to work with
-    cv::cuda::GpuMat prev_gpu = *imgDataPrev.binary_ref;
-    cv::cuda::GpuMat curr_gpu = *imgDataCurr.binary_ref;
-    cv::cuda::GpuMat next_gpu = *imgDataNext.binary_ref;
+    // --- GPU Data Prep ---
+    cv::cuda::GpuMat prev_gpu, curr_gpu, next_gpu;
+    cv::cuda::threshold(*imgDataPrev.binary_ref, prev_gpu, 128, 255, cv::THRESH_BINARY);
+    cv::cuda::threshold(*imgDataCurr.binary_ref, curr_gpu, 128, 255, cv::THRESH_BINARY);
+    cv::cuda::threshold(*imgDataNext.binary_ref, next_gpu, 128, 255, cv::THRESH_BINARY);
 
-    // Ensure images are binary (0 and 1)
-    cv::cuda::GpuMat prev_binary, curr_binary, next_binary;
-    cv::cuda::threshold(prev_gpu, prev_binary, 128, 1, cv::THRESH_BINARY);
-    cv::cuda::threshold(curr_gpu, curr_binary, 128, 1, cv::THRESH_BINARY);
-    cv::cuda::threshold(next_gpu, next_binary, 128, 1, cv::THRESH_BINARY);
-
-    // Step 1: Compute differences between frames
-    cv::cuda::GpuMat diff1, diff2, diffMask;
-    cv::cuda::absdiff(curr_binary, prev_binary, diff1);
-    cv::cuda::absdiff(next_binary, curr_binary, diff2);
-    cv::cuda::bitwise_and(diff1, diff2, diffMask);
-
-    // Step 2: Apply Gaussian blur to reduce noise
-    cv::Ptr<cv::cuda::Filter> gaussianFilter = cv::cuda::createGaussianFilter(
-        diffMask.type(), diffMask.type(), cv::Size(5, 5), 1.5);
-    cv::cuda::GpuMat blurredDiff;
-    gaussianFilter->apply(diffMask, blurredDiff);
-
-    // Step 3: Thresholding to highlight significant changes
-    cv::cuda::GpuMat thresholdedDiff;
-    cv::cuda::threshold(blurredDiff, thresholdedDiff, 0.3, 255, cv::THRESH_BINARY);
-
-    // Step 4: Define ROI (exclude 30% from left and right, 10% from top and bottom)
-    int margin_x = static_cast<int>(curr_gpu.cols * 0.3); // 30% of width
-    int margin_y = static_cast<int>(curr_gpu.rows * 0.1); // 10% of height
-    cv::Rect roi(margin_x, margin_y, curr_gpu.cols - 2 * margin_x, curr_gpu.rows - 2 * margin_y);
-
-    // Create a mask for the central ROI
-    cv::cuda::GpuMat mask(thresholdedDiff.size(), CV_8UC1);
-    mask.setTo(cv::Scalar(0));
-    cv::cuda::GpuMat mask_roi = mask(roi);
-    mask_roi.setTo(cv::Scalar(255));
-
-    // Apply the mask to keep only the central area
-    cv::cuda::GpuMat filtered_roi;
-    cv::cuda::bitwise_and(thresholdedDiff, mask, filtered_roi);
-
-    // Download to CPU for morphological operations and contour detection
-    cv::Mat filtered_roi_cpu;
-    filtered_roi.download(filtered_roi_cpu);
-
-    // Step 5: Morphological operations to clean up the mask
-    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(3, 3));
-    cv::morphologyEx(filtered_roi_cpu, filtered_roi_cpu, cv::MORPH_OPEN, kernel);
-    cv::morphologyEx(filtered_roi_cpu, filtered_roi_cpu, cv::MORPH_CLOSE, kernel);
-
-    // Step 6: Connected component analysis to filter by size
-    cv::Mat labels, stats, centroids;
-    int num_labels = cv::connectedComponentsWithStats(filtered_roi_cpu, labels, stats, centroids, 8);
-
-    int min_size = 10; // Minimum size threshold
-    int max_size = 100; // Maximum size threshold
-    cv::Mat size_filtered_mask = filtered_roi_cpu.clone();
-
-    for (int i = 1; i < num_labels; i++) { // Skip background (label 0)
-        int area = stats.at<int>(i, cv::CC_STAT_AREA);
-        if (area < min_size || area > max_size) {
-            size_filtered_mask.setTo(0, labels == i);
-        }
-    }
-
-    // Step 7: Find contours to highlight changes
-    std::vector<std::vector<cv::Point>> contours;
-    cv::findContours(size_filtered_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-
-    // Step 8: Prepare visualization images
-    // Download current frame for visualization
-    cv::Mat curr_cpu;
-    curr_gpu.download(curr_cpu);
-
-    // Create color image for visualization
-    cv::Mat result_visual;
-    
-    // Check if original frame exists in imgDataCurr
-    bool has_original_frame = false;
-    try {
-        has_original_frame = !imgDataCurr.original_frame.empty();
-    } catch(...) {
-        // Field doesn't exist or is inaccessible
-        has_original_frame = false;
-    }
-    
-    if (!has_original_frame) {
-        cv::cvtColor(curr_cpu * 255, result_visual, cv::COLOR_GRAY2BGR);
+    // Convert to grayscale (if not already)
+    cv::cuda::GpuMat prev_gray, curr_gray, next_gray;
+    if (prev_gpu.channels() > 1) {
+        cv::cuda::cvtColor(prev_gpu, prev_gray, cv::COLOR_BGR2GRAY);
+        cv::cuda::cvtColor(curr_gpu, curr_gray, cv::COLOR_BGR2GRAY);
+        cv::cuda::cvtColor(next_gpu, next_gray, cv::COLOR_BGR2GRAY);
     } else {
+        prev_gray = prev_gpu;
+        curr_gray = curr_gpu;
+        next_gray = next_gpu;
+    }
+
+    // --- Feature Detection (Updated API) ---
+    cv::Ptr<cv::cuda::CornersDetector> detector = cv::cuda::createGoodFeaturesToTrackDetector(
+        prev_gray.type(), 1000, 0.01, 10, 3, true, 0.04);
+    
+    cv::cuda::GpuMat prev_corners;
+    detector->detect(prev_gray, prev_corners);
+
+    if (prev_corners.empty()) {
+        changeMask.setTo(0);
+        return;
+    }
+
+    // --- Sparse Optical Flow ---
+    cv::cuda::GpuMat curr_corners, next_corners, status;
+    cv::Ptr<cv::cuda::SparsePyrLKOpticalFlow> lk = cv::cuda::SparsePyrLKOpticalFlow::create();
+    lk->calc(prev_gray, curr_gray, prev_corners, curr_corners, status);
+    lk->calc(curr_gray, next_gray, curr_corners, next_corners, status);
+
+    // --- Download Results for CPU Processing ---
+    cv::Mat h_prev_corners(prev_corners);
+    cv::Mat h_curr_corners(curr_corners);
+    cv::Mat h_next_corners(next_corners);
+    cv::Mat h_status(status);
+
+    // --- Motion Analysis ---
+    cv::Mat change_mask_cpu(curr_gray.size(), CV_8UC1, cv::Scalar(0));
+    for (int i = 0; i < h_status.cols; i++) {
+        if (h_status.at<uchar>(i)) {
+            cv::Point2f prev_pt = h_prev_corners.at<cv::Point2f>(i);
+            cv::Point2f curr_pt = h_curr_corners.at<cv::Point2f>(i);
+            cv::Point2f next_pt = h_next_corners.at<cv::Point2f>(i);
+
+            // Compute motion vectors
+            cv::Point2f flow1 = curr_pt - prev_pt;
+            cv::Point2f flow2 = next_pt - curr_pt;
+
+            // Check motion consistency
+            if (cv::norm(flow1 - flow2) > 5.0) {
+                cv::circle(change_mask_cpu, curr_pt, 5, cv::Scalar(255), -1);
+            }
+        }
+    }
+
+    // --- ROI Masking ---
+    int margin_x = static_cast<int>(curr_gray.cols * 0.3);
+    int margin_y = static_cast<int>(curr_gray.rows * 0.1);
+    cv::Rect roi(margin_x, margin_y, curr_gray.cols - 2 * margin_x, curr_gray.rows - 2 * margin_y);
+    cv::Mat roi_mask = cv::Mat::zeros(curr_gray.size(), CV_8UC1);
+    roi_mask(roi).setTo(255);
+    cv::bitwise_and(change_mask_cpu, roi_mask, change_mask_cpu);
+
+    // --- Post-Processing ---
+    cv::morphologyEx(change_mask_cpu, change_mask_cpu, cv::MORPH_OPEN, 
+                    cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3)));
+
+    // --- Visualization ---
+    cv::Mat result_visual;
+    if (!imgDataCurr.original_frame.empty()) {
         result_visual = imgDataCurr.original_frame.clone();
+    } else {
+        cv::cvtColor(curr_gray, result_visual, cv::COLOR_GRAY2BGR);
     }
 
-    // Draw circles around changes
-    for (const auto& contour : contours) {
-        cv::Point2f center;
-        float radius;
-        cv::minEnclosingCircle(contour, center, radius);
-
-        // Only draw circles if the center of the change is inside the ROI
-        if (roi.contains(center)) {
-            cv::circle(result_visual, center, static_cast<int>(radius * 1.5), cv::Scalar(0, 0, 255), 2); // Red circle
-        }
-    }
-
-    // Create binary mask for output
-    cv::Mat binary_mask = cv::Mat::zeros(curr_cpu.size(), CV_8UC1);
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(change_mask_cpu, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
     for (const auto& contour : contours) {
         cv::Point2f center;
         float radius;
         cv::minEnclosingCircle(contour, center, radius);
         if (roi.contains(center)) {
-            cv::circle(binary_mask, center, static_cast<int>(radius * 1.5), cv::Scalar(255), -1); // Filled white circle
+            cv::circle(result_visual, center, static_cast<int>(radius * 1.5), cv::Scalar(0, 0, 255), 2);
         }
     }
 
-    // Upload results to GPU
-    changeMask.upload(binary_mask);
+    // --- Upload Results ---
+    changeMask.upload(change_mask_cpu);
     outputAnnotated.upload(result_visual);
 
-    // Display results if needed (add appropriate flag for headless operation)
-    if (!result_visual.empty() && result_visual.cols > 0 && result_visual.rows > 0) {
-        cv::imshow("Change Detection", result_visual);
-        cv::waitKey(1); // Update display with small delay
-    }
-
-    std::cout << "Change detection completed for " << imgDataCurr.outputPath << std::endl;
+    std::cout << "Optical flow change detection completed." << std::endl;
 }
