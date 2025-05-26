@@ -6,16 +6,17 @@
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/core/cuda.hpp>
 #include <iostream>
+#include <chrono> // Add this for timing
 
-void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageData& imgDataNext, cv::cuda::GpuMat& changeMask, cv::cuda::GpuMat& outputAnnotated) {
+void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageData& imgDataNext, 
+                         cv::cuda::GpuMat& changeMask, cv::cuda::GpuMat& outputAnnotated) {
     try {
-        // Check if CUDA is available
+        // Pre-execution validation and error checking
         if (cv::cuda::getCudaEnabledDeviceCount() == 0) {
             std::cerr << "Error: No CUDA-capable device found." << std::endl;
             return;
         }
 
-        // Input validation
         if (imgDataPrev.binary_ref == nullptr || imgDataCurr.binary_ref == nullptr || imgDataNext.binary_ref == nullptr) {
             std::cerr << "Error: One or more binary references are null!" << std::endl;
             return;
@@ -27,6 +28,9 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
             return;
         }
 
+        // Start timing - placed immediately before the actual change detection processing starts
+        auto start_time = std::chrono::high_resolution_clock::now();
+        
         // Get GPU images
         cv::cuda::GpuMat prev_gpu = *imgDataPrev.binary_ref;
         cv::cuda::GpuMat curr_gpu = *imgDataCurr.binary_ref;
@@ -73,7 +77,7 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
         cv::Mat labels, stats, centroids;
         int num_labels = cv::connectedComponentsWithStats(filtered_roi_host, labels, stats, centroids);
 
-        int min_size = 10; // Minimum size threshold
+        int min_size = 20; // Minimum size threshold
         int max_size = 100; // Maximum size threshold (increased from 20)
 
         for (int i = 1; i < num_labels; i++) { // Skip background (label 0)
@@ -93,7 +97,11 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(filtered_roi_contours, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-        // Step 6: Prepare visualization
+        // End timing - placed immediately after the core change detection algorithm completes
+        auto end_time = std::chrono::high_resolution_clock::now();
+        auto execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+        
+        // Step 6: Prepare visualization (not included in timing as this is just for display)
         cv::Mat result_visual;
         
         // Check if original frame exists in imgDataCurr
@@ -140,8 +148,10 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
             }
         }
 
-        // Draw ROI rectangle
-        cv::rectangle(result_visual, roi, cv::Scalar(0, 255, 0), 1);
+        // Add execution time to the image
+        cv::putText(result_visual, "Execution time: " + std::to_string(execution_time) + " ms",
+                   cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 0.7, 
+                   cv::Scalar(255, 255, 255), 2);
         
         // Add change count to the image
         cv::putText(result_visual, "Changes: " + std::to_string(change_count),
@@ -163,8 +173,10 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
         changeMask.upload(binary_mask);
         outputAnnotated.upload(result_visual);
 
+        // Log execution time to console
         std::cout << "Change detection completed for " << imgDataCurr.outputPath 
-                  << " - Found " << change_count << " changes" << std::endl;
+                  << " - Found " << change_count << " changes"
+                  << " - Execution time: " << execution_time << " ms" << std::endl;
     }
     catch (const cv::Exception& e) {
         std::cerr << "OpenCV exception in change detection: " << e.what() << std::endl;

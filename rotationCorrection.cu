@@ -88,8 +88,8 @@ void applyRotationCorrection(ImageData& imgData1, ImageData& imgData2) {
         double angle = atan2(affine_matrix.at<double>(0,1), affine_matrix.at<double>(0,0)) * 180.0 / CV_PI;
         Point2f translation(affine_matrix.at<double>(0,2), affine_matrix.at<double>(1,2));
         
-        std::cout << "Transformation applied - Scale: " << scale << ", Angle: " << angle 
-                  << "°, Translation: (" << translation.x << "," << translation.y << ")" << std::endl;
+        // std::cout << "Transformation applied - Scale: " << scale << ", Angle: " << angle 
+                //   << "°, Translation: (" << translation.x << "," << translation.y << ")" << std::endl;
         
         // Count inliers
         int inlier_count = cv::countNonZero(inliers);

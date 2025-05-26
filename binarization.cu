@@ -73,7 +73,7 @@ void applyBinarization(ImageData& imgData) {
     // Adjust contrast using histogram equalization
     cv::cuda::GpuMat equalized;
     cv::cuda::equalizeHist(grayscale, equalized);
-    std::cout << "Contrast adjusted for " << imgData.outputPath << std::endl;
+    // std::cout << "Contrast adjusted for " << imgData.outputPath << std::endl;
 
     // Allocate histogram on device
     unsigned int* d_histogram;
@@ -99,7 +99,7 @@ void applyBinarization(ImageData& imgData) {
 
     // Calculate Otsu threshold on host
     double otsu_threshold = computeOtsuThreshold(h_histogram, total_pixels);
-    std::cout << "Computed Otsu threshold: " << otsu_threshold << std::endl;
+    // std::cout << "Computed Otsu threshold: " << otsu_threshold << std::endl;
 
     // Apply threshold on GPU using the equalized image
     cv::cuda::threshold(equalized, *binary_image, otsu_threshold, 255, cv::THRESH_BINARY);
@@ -113,6 +113,6 @@ void applyBinarization(ImageData& imgData) {
     if (imgData.binary_ref == nullptr) {
         std::cerr << "Error: binary_ref is null after assignment for " << imgData.outputPath << std::endl;
     } else {
-        std::cout << "binary_ref successfully set for " << imgData.outputPath << std::endl;
+        // std::cout << "binary_ref successfully set for " << imgData.outputPath << std::endl;
     }
 }

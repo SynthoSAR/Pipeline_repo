@@ -67,7 +67,7 @@ void loaderThread(const std::string& videoPath, const std::string& outputFolder)
                 frameCount++;
                 imgData.outputPath = outputFolder + "/frame_" + std::to_string(frameCount) + ".jpg";
                 sharedImageData.push_back(imgData);
-                std::cout << "Frame " << frameCount << " loaded to GPU." << std::endl;
+                // std::cout << "Frame " << frameCount << " loaded to GPU." << std::endl;
 
                 // Skip frames to get the next frame after 1 second
                 cap.set(cv::CAP_PROP_POS_FRAMES, cap.get(cv::CAP_PROP_POS_FRAMES) + frameInterval - 1);
