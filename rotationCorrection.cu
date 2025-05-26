@@ -3,9 +3,7 @@
 using namespace std;
 using namespace cv;
 
-
 void applyRotationCorrection(ImageData& imgData1, ImageData& imgData2) {
-
     if (imgData1.denoised_ref == nullptr || imgData2.denoised_ref == nullptr) {
         std::cerr << "Error: One or both denoised image references are null!" << std::endl;
         return;
@@ -34,10 +32,14 @@ void applyRotationCorrection(ImageData& imgData1, ImageData& imgData2) {
     bf->match(gpu_des1, gpu_des2, matches);
 
     // Sort and retain best 30 matches
-   sort(matches.begin(), matches.end(), [](const DMatch &a, const DMatch &b) {
+    sort(matches.begin(), matches.end(), [](const DMatch &a, const DMatch &b) {
         return a.distance < b.distance;
     });
-    matches.resize(30);
+    
+    // Limit to reasonable number of matches
+    if (matches.size() > 30) {
+        matches.resize(30);
+    }
 
     // Extract matched keypoints
     vector<Point2f> match_points1, match_points2;
@@ -58,120 +60,91 @@ void applyRotationCorrection(ImageData& imgData1, ImageData& imgData2) {
         match_points2.push_back(kp2[m.trainIdx].pt);
     }
 
-    // Find Homography (CPU-based)
-    //Mat H = findHomography(match_points2, match_points1, RANSAC);
-
-    // Apply Homography using CUDA
-    //cv::cuda::GpuMat gpu_aligned_img2;
-    //cv::cuda::warpPerspective(gpu_img2, gpu_aligned_img2, H, gpu_img1.size());
-
-    // Compute Intersection Mask
-    //cv::cuda::GpuMat gpu_mask1, gpu_mask2, gpu_intersection_mask;
-    //cv::cuda::threshold(gpu_img1, gpu_mask1, 1, 255, THRESH_BINARY);
-    //cv::cuda::threshold(gpu_aligned_img2, gpu_mask2, 1, 255, THRESH_BINARY);
-
-    // Bitwise AND on GPU
-    //cv::cuda::bitwise_and(gpu_mask1, gpu_mask2, gpu_intersection_mask);
-
-    // Extract common regions on GPU
-    //cv::cuda::GpuMat gpu_common_img1, gpu_common_aligned_img2;
-    //cv::cuda::bitwise_and(gpu_img1, gpu_img1, gpu_common_img1, gpu_intersection_mask);
-    //cv::cuda::bitwise_and(gpu_aligned_img2, gpu_aligned_img2, gpu_common_aligned_img2,  gpu_intersection_mask);
-    
-    
-    
-    
-    
-    
-    
-    
-    double angle_sum = 0.0;
-    int valid_pairs = 0;
-    for (size_t i = 0; i < match_points1.size(); ++i) {
-        // For each pair, compute the angle between vectors to the image center
-        Point2f p1 = match_points1[i];
-        Point2f p2 = match_points2[i];
-        Point2f center(gpu_img1.cols / 2.0f, gpu_img1.rows / 2.0f); // Image center
-
-        // Vectors from center to keypoints
-        Point2f v1 = p1 - center;
-        Point2f v2 = p2 - center;
-
-        // Compute angle using dot product and cross product
-        double dot = v1.x * v2.x + v1.y * v2.y;
-        double det = v1.x * v2.y - v1.y * v2.x;
-        double angle = atan2(det, dot) * 180.0 / CV_PI; // Convert to degrees
-
-        if (std::abs(angle) < 45.0) { // Filter outliers (arbitrary threshold)
-            angle_sum += angle;
-            valid_pairs++;
-        }
-    }
-
-    if (valid_pairs == 0) {
-        std::cerr << "Error: No valid rotation angle computed!" << std::endl;
+    // Check if we have enough matches
+    if (match_points1.size() < 3) {
+        std::cerr << "Error: Not enough matching points for transformation!" << std::endl;
         imgData1.rotation_ref = new cv::cuda::GpuMat();
         imgData2.rotation_ref = new cv::cuda::GpuMat();
+     
         gpu_img1.copyTo(*imgData1.rotation_ref);
         gpu_img2.copyTo(*imgData2.rotation_ref);
+
         return;
     }
 
-    double rotation_angle = angle_sum / valid_pairs;
-    std::cout << "Computed rotation angle: " << rotation_angle << " degrees" << std::endl;
+    // Using partial affine transformation (rotation + translation + uniform scale)
+    Mat inliers; // Define inliers variable
+    Mat affine_matrix = estimateAffinePartial2D(match_points2, match_points1, inliers, RANSAC);
 
-    // Create rotation matrix (2x3 affine matrix)
-    Point2f center(gpu_img1.cols / 2.0f, gpu_img1.rows / 2.0f);
-    Mat rotation_matrix = getRotationMatrix2D(center, rotation_angle, 1.0); // Scale = 1.0 (no scaling)
-
-    // Apply rotation using CUDA
     cv::cuda::GpuMat gpu_aligned_img2;
-    cv::cuda::warpAffine(gpu_img2, gpu_aligned_img2, rotation_matrix, gpu_img1.size());
     
+    if (!affine_matrix.empty()) {
+        // Apply transformation using the affine matrix
+        cv::cuda::warpAffine(gpu_img2, gpu_aligned_img2, affine_matrix, gpu_img1.size());
+        
+        // Report transformation parameters
+        double scale = std::sqrt(affine_matrix.at<double>(0,0)*affine_matrix.at<double>(0,0) + 
+                               affine_matrix.at<double>(0,1)*affine_matrix.at<double>(0,1));
+        double angle = atan2(affine_matrix.at<double>(0,1), affine_matrix.at<double>(0,0)) * 180.0 / CV_PI;
+        Point2f translation(affine_matrix.at<double>(0,2), affine_matrix.at<double>(1,2));
+        
+        std::cout << "Transformation applied - Scale: " << scale << ", Angle: " << angle 
+                  << "°, Translation: (" << translation.x << "," << translation.y << ")" << std::endl;
+        
+        // Count inliers
+        int inlier_count = cv::countNonZero(inliers);
+        std::cout << "Inlier count: " << inlier_count << " out of " << match_points1.size() << std::endl;
+    } else {
+        std::cerr << "Warning: Could not compute affine transformation. Falling back to manual rotation." << std::endl;
+        
+        // Fallback to manual rotation calculation
+        double angle_sum = 0.0;
+        int valid_pairs = 0;
+        for (size_t i = 0; i < match_points1.size(); ++i) {
+            // For each pair, compute the angle between vectors to the image center
+            Point2f p1 = match_points1[i];
+            Point2f p2 = match_points2[i];
+            Point2f center(gpu_img1.cols / 2.0f, gpu_img1.rows / 2.0f); // Image center
+
+            // Vectors from center to keypoints
+            Point2f v1 = p1 - center;
+            Point2f v2 = p2 - center;
+
+            // Compute angle using dot product and cross product
+            double dot = v1.x * v2.x + v1.y * v2.y;
+            double det = v1.x * v2.y - v1.y * v2.x;
+            double angle = atan2(det, dot) * 180.0 / CV_PI; // Convert to degrees
+
+            if (std::abs(angle) < 45.0) { // Filter outliers (arbitrary threshold)
+                angle_sum += angle;
+                valid_pairs++;
+            }
+        }
+
+        if (valid_pairs == 0) {
+            std::cerr << "Error: No valid rotation angle computed!" << std::endl;
+            imgData1.rotation_ref = new cv::cuda::GpuMat();
+            imgData2.rotation_ref = new cv::cuda::GpuMat();
+            gpu_img1.copyTo(*imgData1.rotation_ref);
+            gpu_img2.copyTo(*imgData2.rotation_ref);
+            return;
+        }
+
+        double rotation_angle = angle_sum / valid_pairs;
+        std::cout << "Computed rotation angle (fallback): " << rotation_angle << " degrees" << std::endl;
+
+        // Create rotation matrix (2x3 affine matrix)
+        Point2f center(gpu_img1.cols / 2.0f, gpu_img1.rows / 2.0f);
+        Mat rotation_matrix = getRotationMatrix2D(center, rotation_angle, 1.0); // Scale = 1.0 (no scaling)
+
+        // Apply rotation using CUDA
+        cv::cuda::warpAffine(gpu_img2, gpu_aligned_img2, rotation_matrix, gpu_img1.size());
+    }
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+    // Allocate and store results
     imgData1.rotation_ref = new cv::cuda::GpuMat();
     imgData2.rotation_ref = new cv::cuda::GpuMat();
      
     gpu_img1.copyTo(*imgData1.rotation_ref);
     gpu_aligned_img2.copyTo(*imgData2.rotation_ref);
-
-    //gpu_common_img1.copyTo(*imgData1.rotation_ref);
-    //gpu_common_aligned_img2.copyTo(*imgData2.rotation_ref);
-
-    
-    ///Mat common_img1, common_aligned_img2;
-    //gpu_common_img1.download(common_img1);
-    //gpu_common_aligned_img2.download(common_aligned_img2);
-
-
-   // Mat combined_common_img;
-    //hconcat(common_img1, common_aligned_img2, combined_common_img);
-
-    //imshow("Common Region With Rotation correct", combined_common_img);
-    //waitKey(0);
-
-    //Mat common_img1, common_aligned_img2;
-    //gpu_common_img1.download(common_img1);
-    //gpu_common_aligned_img2.download(common_aligned_img2);
-    
-    
-    
-   
 }

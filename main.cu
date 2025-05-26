@@ -50,7 +50,7 @@ void loaderThread(const std::string& videoPath, const std::string& outputFolder)
     }
     double fps = cap.get(cv::CAP_PROP_FPS); // Get frames per second
     // int frameInterval = static_cast<int>(fps /20.0 ); // Number of frames to skip for 1 frame per second
-    int frameInterval = static_cast<int>( 2 ); // Number of frames to skip for 1 frame per second
+    int frameInterval = static_cast<int>( fps/4.0 ); // Number of frames to skip for 1 frame per second
 
     int frameCount = 0;
     cv::Mat frame;
@@ -192,9 +192,9 @@ void changeDetectionThread() {
         );
 
         // Update the middle frame's binary_ref with the change mask
-        if (sharedImageDataBinarized[1].binary_ref != nullptr) {
-            delete sharedImageDataBinarized[1].binary_ref; // Free old binary_ref
-        }
+        // if (sharedImageDataBinarized[1].binary_ref != nullptr) {
+        //     delete sharedImageDataBinarized[1].binary_ref; // Free old binary_ref
+        // }
         sharedImageDataBinarized[1].annotated_ref = new cv::cuda::GpuMat(outputAnnotated);
         
         // Optionally, you can also store the annotated output if needed
