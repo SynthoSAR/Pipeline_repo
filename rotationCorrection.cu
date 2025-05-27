@@ -93,7 +93,7 @@ void applyRotationCorrection(ImageData& imgData1, ImageData& imgData2) {
         
         // Count inliers
         int inlier_count = cv::countNonZero(inliers);
-        std::cout << "Inlier count: " << inlier_count << " out of " << match_points1.size() << std::endl;
+        // std::cout << "Inlier count: " << inlier_count << " out of " << match_points1.size() << std::endl;
     } else {
         std::cerr << "Warning: Could not compute affine transformation. Falling back to manual rotation." << std::endl;
         

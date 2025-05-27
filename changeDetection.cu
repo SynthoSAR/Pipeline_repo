@@ -174,9 +174,9 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
         outputAnnotated.upload(result_visual);
 
         // Log execution time to console
-        std::cout << "Change detection completed for " << imgDataCurr.outputPath 
-                  << " - Found " << change_count << " changes"
-                  << " - Execution time: " << execution_time << " ms" << std::endl;
+        // std::cout << "Change detection completed for " << imgDataCurr.outputPath 
+        //           << " - Found " << change_count << " changes"
+        //           << " - Execution time: " << execution_time << " ms" << std::endl;
     }
     catch (const cv::Exception& e) {
         std::cerr << "OpenCV exception in change detection: " << e.what() << std::endl;

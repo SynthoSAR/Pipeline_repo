@@ -22,7 +22,7 @@ void saveImageFromGPU(const ImageData& imgData) {
             std::cerr << "Failed to save the image to: " << imgData.outputPath << std::endl;
             exit(EXIT_FAILURE);
         }
-        std::cerr << "No ERROR , Process Correctly" << std::endl;
+        // std::cerr << "No ERROR , Process Correctly" << std::endl;
     }
     
 }

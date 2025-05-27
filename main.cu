@@ -6,13 +6,13 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <queue>
+#include <atomic>
 #include "imageLoad.cuh"
 #include "imageSave.cuh"
 #include "noiseReduction.cuh"
 #include "rotationCorrection.cuh"
 #include "binarization.cuh"
-#include "changeDetection.cuh"
-
 std::mutex mtx_loader;   // Mutex for loader thread
 std::mutex mtx_noise;    // Mutex for noise reduction threads
 std::mutex mtx_rotation;  // Mutex for rotation correction
@@ -58,7 +58,7 @@ void loaderThread(const std::string& videoPath, const std::string& outputFolder)
     while (true) {
         std::unique_lock<std::mutex> lock(mtx_loader);
         cv_loader.wait(lock, [] { return !isDataReady; }); // Wait if data is already being processed
-
+        std::cout << "Image Loader" << std::endl;
         sharedImageData.clear();
         for (int i = 0; i < 3; ++i) {  // Load two frames per iteration
             if (cap.read(frame)) {
@@ -94,6 +94,7 @@ void noiseReductionThread() {
         sharedImageDataNoise.clear();
 
         if (isDataReady) {
+            std::cout << "Noise Reduction" << std::endl;
             std::thread t1(applyNoiseReduction, std::ref(sharedImageData[0]));
             std::thread t2(applyNoiseReduction, std::ref(sharedImageData[1]));
             std::thread t3(applyNoiseReduction, std::ref(sharedImageData[2]));
@@ -108,6 +109,7 @@ void noiseReductionThread() {
             isNoiseReductionDone = true; // Indicate noise reduction is done for at least one image
             isDataReady = false; // Reset data ready flag
             cv_rotation.notify_all(); // Notify saver thread to start saving
+            cv_loader.notify_all(); // Notify loader thread to load new images
         } else if (isProcessingDone) {
             break;
         }
@@ -127,6 +129,7 @@ void rotationCorrectionThread() {
             //applyRotationCorrection(std::ref(sharedImageDataNoise[0]), std::ref(sharedImageDataNoise[1]));
             
             sharedImageDataRotation.clear();
+            std::cout << "Rotation Correction" << std::endl;
             std::thread t1(applyRotationCorrection, std::ref(sharedImageDataNoise[1]), std::ref(sharedImageDataNoise[0]) );
             std::thread t2(applyRotationCorrection, std::ref(sharedImageDataNoise[1]), std::ref(sharedImageDataNoise[2]) );
             
@@ -140,6 +143,7 @@ void rotationCorrectionThread() {
             isRotationDone = true;
             isNoiseReductionDone = false;
             cv_binarization.notify_all();
+            cv_noise.notify_all(); // Notify noise reduction thread to load new images
         } else if (isProcessingDone) {
             break;
         }
@@ -154,6 +158,7 @@ void binarizationThread() {
         if (isProcessingDone) break;
 
         sharedImageDataBinarized.clear();
+        std::cout << "Binarization" << std::endl;
         for (auto& imgData : sharedImageDataRotation) {
             applyBinarization(imgData);
             sharedImageDataBinarized.push_back(imgData);
@@ -162,6 +167,7 @@ void binarizationThread() {
         isBinarizationDone = true;
         isRotationDone = false;
         cv_change.notify_all();
+        cv_rotation.notify_all(); // Notify rotation correction thread to load new images
     }
 }
 
@@ -183,6 +189,7 @@ void changeDetectionThread() {
         cv::cuda::GpuMat outputAnnotated; // Add this for the visual result
         
         // Call the updated function with both output parameters
+        std::cout << "Change Detection" << std::endl;
         applyChangeDetection(
             sharedImageDataBinarized[0], 
             sharedImageDataBinarized[1], 
@@ -204,6 +211,7 @@ void changeDetectionThread() {
         isChangeDetectionDone = true;
         isBinarizationDone = false;
         cv_saver.notify_all();
+        cv_binarization.notify_all(); // Notify binarization thread to load new images
     }
 }
 
@@ -222,7 +230,7 @@ void saverThread() {
             }
 	        isChangeDetectionDone = false;  // Reset flag for next batch
           //  isDataReady = false;
-            cv_loader.notify_all(); // Notify loader thread to load new images
+            cv_change.notify_all(); // Notify change detection thread to load new images
         } else if (isProcessingDone) {
             break;
         }
