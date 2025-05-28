@@ -6,6 +6,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <cstdlib>
 #include "imageLoad.cuh"
 #include "imageSave.cuh"
 #include "noiseReduction.cuh"
@@ -42,15 +43,20 @@ std::vector<ImageData> sharedImageDataRotation(3); // For rotation correction
 std::vector<ImageData> sharedImageDataBinarized(3); // For binary
 
 
-void loaderThread(const std::string& videoPath, const std::string& outputFolder) {
+void loaderThread(const std::string& videoPath, const std::string& outputFolder, float desiredFrameRate) {
     cv::VideoCapture cap(videoPath);
     if (!cap.isOpened()) {
         std::cerr << "Error opening video file: " << videoPath << std::endl;
         return;
     }
     double fps = cap.get(cv::CAP_PROP_FPS); // Get frames per second
-    // int frameInterval = static_cast<int>(fps /20.0 ); // Number of frames to skip for 1 frame per second
-    int frameInterval = static_cast<int>( fps/4.0 ); // Number of frames to skip for 1 frame per second
+    // Calculate frame interval based on desired frame rate
+    // frameInterval = (video fps) / (desired output fps)
+    int frameInterval = static_cast<int>(fps / desiredFrameRate);
+    if (frameInterval < 1) frameInterval = 1; // Ensure we don't skip negative frames
+    
+    std::cout << "Video FPS: " << fps << ", Desired output FPS: " << desiredFrameRate 
+              << ", Frame interval: " << frameInterval << std::endl;
 
     int frameCount = 0;
     cv::Mat frame;
@@ -230,11 +236,55 @@ void saverThread() {
     }
 }
 
-int main() {
-    std::string videoPath = "/home/asith/Desktop/FYP/Testing_Pipeline_C/input_video/video1.mp4";
-    std::string outputFolder = "/home/asith/Desktop/FYP/Testing_Pipeline_C/output_frames";
+int main(int argc, char* argv[]) {
+    std::string videoPath;
+    std::string outputFolder;
+    float frameRate = 4.0f; // Default frame rate
+    
+    // Check if command line arguments are provided
+    if (argc >= 4) {
+        videoPath = argv[1];
+        outputFolder = argv[2];
+        frameRate = std::stof(argv[3]);
+        std::cout << "Using command line arguments:" << std::endl;
+        std::cout << "Video path: " << videoPath << std::endl;
+        std::cout << "Output folder: " << outputFolder << std::endl;
+        std::cout << "Frame rate: " << frameRate << " FPS" << std::endl;
+    } else if (argc >= 3) {
+        videoPath = argv[1];
+        outputFolder = argv[2];
+        std::cout << "Using command line arguments:" << std::endl;
+        std::cout << "Video path: " << videoPath << std::endl;
+        std::cout << "Output folder: " << outputFolder << std::endl;
+        std::cout << "Frame rate: " << frameRate << " FPS (default)" << std::endl;
+    } else {
+        // Use default paths if no arguments provided
+        videoPath = "/home/chavindu/Desktop/Pipeline_repo/input_video/video1.mp4";
+        outputFolder = "/home/chavindu/Desktop/Pipeline_repo/output_frames";
+        std::cout << "Using default paths:" << std::endl;
+        std::cout << "Video path: " << videoPath << std::endl;
+        std::cout << "Output folder: " << outputFolder << std::endl;
+        std::cout << "Frame rate: " << frameRate << " FPS (default)" << std::endl;
+    }
 
-    std::thread loader(loaderThread, videoPath, outputFolder);
+    // Verify video file exists
+    cv::VideoCapture testCap(videoPath);
+    if (!testCap.isOpened()) {
+        std::cerr << "Error: Cannot open video file: " << videoPath << std::endl;
+        return -1;
+    }
+    testCap.release();
+
+    // Create output directory if it doesn't exist
+    std::string createDirCommand = "mkdir -p \"" + outputFolder + "\"";
+    int result = system(createDirCommand.c_str());
+    if (result != 0) {
+        std::cerr << "Warning: Could not create output directory: " << outputFolder << std::endl;
+    }
+
+    std::cout << "Starting video processing pipeline..." << std::endl;
+
+    std::thread loader(loaderThread, videoPath, outputFolder, frameRate);
     std::thread noiseReducer(noiseReductionThread);
     std::thread rotator(rotationCorrectionThread); 
     std::thread binarizer(binarizationThread);

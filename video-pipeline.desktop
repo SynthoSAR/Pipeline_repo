@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Video Processing Pipeline
+Comment=CUDA-accelerated video processing with modern GUI
+Exec=/home/chavindu/Desktop/Pipeline_repo/run_frontend.sh
+Icon=applications-multimedia
+Path=/home/chavindu/Desktop/Pipeline_repo
+Terminal=false
+StartupNotify=true
+Categories=AudioVideo;Video;Graphics;
+Keywords=video;processing;cuda;pipeline;frames;
+MimeType=video/mp4;video/avi;video/quicktime;video/x-msvideo;video/webm;video/x-matroska;
