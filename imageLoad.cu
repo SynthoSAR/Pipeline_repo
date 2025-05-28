@@ -13,6 +13,9 @@
 }
 
 void loadImageToGPU(const cv::Mat& img, ImageData& imgData) {
+    // Start timing when loading begins
+    imgData.processing_start_time = std::chrono::high_resolution_clock::now();
+    
     // Store the original frame
     imgData.original_frame = img.clone();
 

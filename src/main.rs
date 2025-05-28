@@ -1,10 +1,20 @@
 use eframe::egui;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::SystemTime;
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
+
+// Add a new struct to hold processing metrics
+#[derive(Clone, Debug)]
+struct ProcessingMetrics {
+    frame_path: String,
+    change_count: i32,
+    current_latency: i64,
+    average_latency: i64,
+}
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
@@ -70,6 +80,7 @@ fn setup_custom_style(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
+// Add metrics fields to PipelineApp
 struct PipelineApp {
     selected_video_path: Option<PathBuf>,
     output_folder_path: Option<PathBuf>,
@@ -100,6 +111,12 @@ struct PipelineApp {
     loaded_images: HashMap<PathBuf, egui::TextureHandle>,
     preview_size: egui::Vec2,
     show_preview: bool,
+    // Add metrics fields
+    metrics_receiver: Option<mpsc::Receiver<ProcessingMetrics>>,
+    latest_metrics: Option<ProcessingMetrics>,
+    all_metrics: Vec<ProcessingMetrics>,
+    total_frames_processed: usize,
+    overall_average_latency: f64,
 }
 
 impl Default for PipelineApp {
@@ -146,6 +163,12 @@ impl Default for PipelineApp {
             loaded_images: HashMap::new(),
             preview_size: egui::Vec2::new(800.0, 1000.0),
             show_preview: true,
+            // Initialize metrics fields
+            metrics_receiver: None,
+            latest_metrics: None,
+            all_metrics: Vec::new(),
+            total_frames_processed: 0,
+            overall_average_latency: 0.0,
         }
     }
 }
@@ -183,6 +206,24 @@ enum ProcessingStatus {
 
 impl eframe::App for PipelineApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Check for metrics updates
+        if let Some(metrics_receiver) = &self.metrics_receiver {
+            while let Ok(metrics) = metrics_receiver.try_recv() {
+                self.latest_metrics = Some(metrics.clone());
+                self.all_metrics.push(metrics);
+                self.total_frames_processed = self.all_metrics.len();
+                
+                // Calculate overall average
+                if !self.all_metrics.is_empty() {
+                    self.overall_average_latency = self.all_metrics.iter()
+                        .map(|m| m.current_latency as f64)
+                        .sum::<f64>() / self.all_metrics.len() as f64;
+                }
+                
+                ctx.request_repaint();
+            }
+        }
+
         // Real-time frame monitoring during processing
         if matches!(self.processing_status, ProcessingStatus::Processing) || self.auto_slideshow_on_generation {
             // Check for new frames every 500ms
@@ -631,6 +672,137 @@ impl eframe::App for PipelineApp {
                         .id_source("right_column_scroll")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
+                    
+                    // Performance Metrics Card (NEW)
+                    if self.latest_metrics.is_some() || !self.all_metrics.is_empty() {
+                        egui::Frame::none()
+                            .fill(egui::Color32::from_rgb(30, 30, 35))
+                            .rounding(12.0)
+                            .inner_margin(egui::Margin::same(20.0))
+                            .show(ui, |ui| {
+                                ui.add(egui::Label::new(
+                                    egui::RichText::new("⚡ Performance Metrics")
+                                        .size(18.0)
+                                        .strong()
+                                ));
+                                ui.add_space(12.0);
+                                
+                                // Real-time metrics display
+                                if let Some(metrics) = &self.latest_metrics {
+                                    egui::Grid::new("metrics_grid")
+                                        .num_columns(2)
+                                        .spacing([20.0, 8.0])
+                                        .show(ui, |ui| {
+                                            // Current frame metrics
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new("🎯 Current Frame:")
+                                                    .strong()
+                                            ));
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new(format!("{} ms", metrics.current_latency))
+                                                    .color(egui::Color32::from_rgb(120, 200, 255))
+                                            ));
+                                            ui.end_row();
+                                            
+                                            // Running average
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new("📊 Running Average:")
+                                                    .strong()
+                                            ));
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new(format!("{} ms", metrics.average_latency))
+                                                    .color(egui::Color32::from_rgb(100, 255, 100))
+                                                    .strong()
+                                            ));
+                                            ui.end_row();
+                                            
+                                            // Changes detected
+                                            // ui.add(egui::Label::new(
+                                            //     egui::RichText::new("🔍 Changes Found:")
+                                            //         .strong()
+                                            // ));
+                                            // ui.add(egui::Label::new(
+                                            //     egui::RichText::new(format!("{}", metrics.change_count))
+                                            //         .color(egui::Color32::from_rgb(255, 200, 100))
+                                            // ));
+                                            // ui.end_row();
+                                            
+                                            // Total frames processed
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new("📹 Frames Processed:")
+                                                    .strong()
+                                            ));
+                                            ui.add(egui::Label::new(
+                                                egui::RichText::new(format!("{}", self.total_frames_processed))
+                                                    .color(egui::Color32::from_rgb(200, 200, 255))
+                                            ));
+                                            ui.end_row();
+                                            
+                                            // Overall average (calculated by Rust)
+                                            if self.total_frames_processed > 0 {
+                                                ui.add(egui::Label::new(
+                                                    egui::RichText::new("🎯 Overall Average:")
+                                                        .strong()
+                                                ));
+                                                ui.add(egui::Label::new(
+                                                    egui::RichText::new(format!("{:.1} ms", self.overall_average_latency))
+                                                        .color(egui::Color32::from_rgb(255, 100, 255))
+                                                        .strong()
+                                                ));
+                                                ui.end_row();
+                                            }
+                                        });
+                                    
+                                    ui.add_space(8.0);
+                                    ui.separator();
+                                    ui.add_space(8.0);
+                                    
+                                    // Performance summary
+                                    let fps_estimate = if metrics.average_latency > 0 {
+                                        1000.0 / metrics.average_latency as f64
+                                    } else {
+                                        0.0
+                                    };
+                                    
+                                    ui.horizontal(|ui| {
+                                        ui.add(egui::Label::new(
+                                            egui::RichText::new("🚀 Throughput:")
+                                                .strong()
+                                        ));
+                                        ui.add(egui::Label::new(
+                                            egui::RichText::new(format!("{:.2} FPS", fps_estimate))
+                                                .color(egui::Color32::from_rgb(255, 255, 100))
+                                        ));
+                                    });
+                                    
+                                    // Performance status indicator
+                                    ui.add_space(4.0);
+                                    let (status_text, status_color) = if metrics.average_latency < 100 {
+                                        ("🟢 Excellent Performance", egui::Color32::GREEN)
+                                    } else if metrics.average_latency < 500 {
+                                        ("🟡 Good Performance", egui::Color32::YELLOW)
+                                    } else if metrics.average_latency < 1000 {
+                                        ("🟠 Fair Performance", egui::Color32::from_rgb(255, 165, 0))
+                                    } else {
+                                        ("🔴 Slow Performance", egui::Color32::RED)
+                                    };
+                                    
+                                    ui.add(egui::Label::new(
+                                        egui::RichText::new(status_text)
+                                            .color(status_color)
+                                            .italics()
+                                    ));
+                                } else {
+                                    ui.add(egui::Label::new(
+                                        egui::RichText::new("No metrics available yet...")
+                                            .color(egui::Color32::from_rgb(140, 140, 140))
+                                            .italics()
+                                    ));
+                                }
+                            });
+                        
+                        ui.add_space(20.0);
+                    }
                     
                     // Status display card
                     egui::Frame::none()
@@ -1299,28 +1471,27 @@ impl PipelineApp {
             self.processing_status = ProcessingStatus::Processing;
             self.current_status = "Initializing...".to_string();
             
-            // Clear existing output frames when starting new processing
+            // Clear existing data
             self.output_frames.clear();
             self.selected_frame = None;
+            self.all_metrics.clear();
+            self.latest_metrics = None;
+            self.total_frames_processed = 0;
+            self.overall_average_latency = 0.0;
             
-            // Prepare auto-slideshow if enabled
-            if self.auto_slideshow_on_generation {
-                self.slideshow_current_index = 0;
-                self.slideshow_last_change = std::time::Instant::now();
-                // Don't start slideshow yet - wait for first frame
-            }
+            // Create channels
+            let (status_sender, status_receiver) = mpsc::channel();
+            self.status_receiver = Some(status_receiver);
 
-            // Create channel for status updates
-            let (sender, receiver) = mpsc::channel();
-            self.status_receiver = Some(receiver);
-
-            // Create channel for cancellation
             let (cancel_sender, cancel_receiver) = mpsc::channel();
             self.cancel_sender = Some(cancel_sender);
 
-            // Create channel for real-time frame updates
             let (frame_sender, frame_receiver) = mpsc::channel();
             self.frame_receiver = Some(frame_receiver);
+
+            // Create metrics channel
+            let (metrics_sender, metrics_receiver) = mpsc::channel();
+            self.metrics_receiver = Some(metrics_receiver);
 
             // Clone paths for the thread
             let video_path_clone = video_path.clone();
@@ -1330,7 +1501,6 @@ impl PipelineApp {
                 .to_string_lossy()
                 .to_string();
 
-            // Add to processed videos list immediately
             self.processed_videos.push(ProcessedVideo {
                 name: video_name.clone(),
                 path: output_path.clone(),
@@ -1338,7 +1508,6 @@ impl PipelineApp {
                 timestamp: SystemTime::now(),
             });
 
-            // Capture frame rate for the thread
             let frame_rate = self.frame_rate;
 
             // Spawn processing thread
@@ -1346,22 +1515,22 @@ impl PipelineApp {
                 let result = Self::run_cuda_pipeline(
                     &video_path_clone, 
                     &output_path_clone, 
-                    sender.clone(),
+                    status_sender.clone(),
                     cancel_receiver,
                     frame_sender,
+                    metrics_sender, // Pass metrics sender
                     frame_rate
                 );
                 
                 match result {
                     Ok(_) => {
-                        let _ = sender.send("Processing completed successfully!".to_string());
+                        let _ = status_sender.send("Processing completed successfully!".to_string());
                     }
                     Err(e) => {
                         if e.contains("Cancelled by user") {
-                            let _ = sender.send("Cancelled by user".to_string());
-                        }
-                        else {
-                            let _ = sender.send("Processing completed successfully!".to_string());
+                            let _ = status_sender.send("Cancelled by user".to_string());
+                        } else {
+                            let _ = status_sender.send("Processing completed successfully!".to_string());
                         }
                     }
                 }
@@ -1452,6 +1621,7 @@ impl PipelineApp {
         status_sender: mpsc::Sender<String>,
         cancel_receiver: mpsc::Receiver<bool>,
         frame_sender: mpsc::Sender<Vec<PathBuf>>,
+        metrics_sender: mpsc::Sender<ProcessingMetrics>, // Add metrics sender
         frame_rate: f32
     ) -> Result<(), String> {
         // Clear output directory first
@@ -1464,105 +1634,95 @@ impl PipelineApp {
 
         let _ = status_sender.send("Starting CUDA pipeline...".to_string());
 
-        // Run the CUDA executable
+        // Run the CUDA executable with stdout capture
         let mut child = Command::new("./main")
             .arg(video_path.to_string_lossy().as_ref())
             .arg(output_path.to_string_lossy().as_ref())
             .arg(frame_rate.to_string())
             .current_dir("/home/asith/Desktop/FYP/Testing_Pipeline_C")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("Failed to start CUDA pipeline: {}", e))?;
 
+        // Capture stdout for metrics parsing
+        let stdout = child.stdout.take().unwrap();
+        let reader = BufReader::new(stdout);
+
         let mut last_frame_count = 0;
 
-        // Monitor the process and check for cancellation
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => {
-                    // Process has finished
-                    break;
+        // Monitor the process and parse output
+        for line in reader.lines() {
+            let line = line.map_err(|e| format!("Failed to read output: {}", e))?;
+            
+            // Parse metrics line
+            if line.starts_with("METRICS|") {
+                let parts: Vec<&str> = line.split('|').collect();
+                if parts.len() >= 5 {
+                    let metrics = ProcessingMetrics {
+                        frame_path: parts[1].to_string(),
+                        change_count: parts[2].parse().unwrap_or(0),
+                        current_latency: parts[3].parse().unwrap_or(0),
+                        average_latency: parts[4].parse().unwrap_or(0),
+                    };
+                    let _ = metrics_sender.send(metrics);
                 }
-                Ok(None) => {
-                    // Process is still running, check for cancellation
-                    if cancel_receiver.try_recv().is_ok() {
-                        let _ = child.kill();
-                        let _ = child.wait(); // Wait for process to actually terminate
-                        return Err("Cancelled by user".to_string());
-                    }
+            }
+            
+            // Check for cancellation
+            if cancel_receiver.try_recv().is_ok() {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Cancelled by user".to_string());
+            }
+            
+            // Scan for new frames periodically
+            if let Ok(entries) = std::fs::read_dir(output_path) {
+                let mut frames: Vec<PathBuf> = entries
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .filter(|path| {
+                        path.is_file() && 
+                        path.extension()
+                            .and_then(|ext| ext.to_str())
+                            .map(|ext| ext.to_lowercase())
+                            .map(|ext| matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "bmp"))
+                            .unwrap_or(false)
+                    })
+                    .collect();
+                
+                frames.sort_by(|a, b| {
+                    let a_name = a.file_name().unwrap_or_default().to_string_lossy();
+                    let b_name = b.file_name().unwrap_or_default().to_string_lossy();
                     
-                    // Scan for new frames and update UI in real-time
-                    if let Ok(entries) = std::fs::read_dir(output_path) {
-                        let mut frames: Vec<PathBuf> = entries
-                            .filter_map(|entry| entry.ok())
-                            .map(|entry| entry.path())
-                            .filter(|path| {
-                                path.is_file() && 
-                                path.extension()
-                                    .and_then(|ext| ext.to_str())
-                                    .map(|ext| ext.to_lowercase())
-                                    .map(|ext| matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "bmp"))
-                                    .unwrap_or(false)
-                            })
-                            .collect();
-                        
-                        // Sort frames by numerical order (extract frame number from filename)
-                        frames.sort_by(|a, b| {
-                            let a_name = a.file_name().unwrap_or_default().to_string_lossy();
-                            let b_name = b.file_name().unwrap_or_default().to_string_lossy();
-                            
-                            // Extract frame numbers for numerical comparison
-                            let extract_frame_number = |name: &str| -> u32 {
-                                if let Some(start) = name.find("frame_") {
-                                    let after_prefix = &name[start + 6..]; // Skip "frame_"
-                                    if let Some(end) = after_prefix.find('.') {
-                                        let number_str = &after_prefix[..end];
-                                        return number_str.parse().unwrap_or(0);
-                                    }
-                                }
-                                0
-                            };
-                            
-                            let a_num = extract_frame_number(&a_name);
-                            let b_num = extract_frame_number(&b_name);
-                            a_num.cmp(&b_num)
-                        });
-                        
-                        // Send frame update if count changed
-                        if frames.len() != last_frame_count {
-                            last_frame_count = frames.len();
-                            let _ = frame_sender.send(frames.clone());
-                            let _ = status_sender.send(format!("Processing... {} frames generated", frames.len()));
+                    let extract_frame_number = |name: &str| -> u32 {
+                        if let Some(start) = name.find("frame_") {
+                            let after_prefix = &name[start + 6..];
+                            if let Some(end) = after_prefix.find('.') {
+                                let number_str = &after_prefix[..end];
+                                return number_str.parse().unwrap_or(0);
+                            }
                         }
-                    }
+                        0
+                    };
                     
-                    // Sleep briefly to avoid busy waiting
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                }
-                Err(e) => {
-                    return Err(format!("Failed to check process status: {}", e));
+                    let a_num = extract_frame_number(&a_name);
+                    let b_num = extract_frame_number(&b_name);
+                    a_num.cmp(&b_num)
+                });
+                
+                if frames.len() != last_frame_count {
+                    last_frame_count = frames.len();
+                    let _ = frame_sender.send(frames.clone());
+                    let _ = status_sender.send(format!("Processing... {} frames generated", frames.len()));
                 }
             }
         }
 
-        // Check if output frames were actually generated
-        let output_files = std::fs::read_dir(output_path)
-            .map_err(|e| format!("Failed to read output directory: {}", e))?
-            .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry.path().is_file() && 
-                entry.path().extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| ext.to_lowercase())
-                    .map(|ext| matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "bmp"))
-                    .unwrap_or(false)
-            })
-            .count();
+        // Wait for process to complete
+        let _ = child.wait();
 
-        if output_files == 0 {
-            return Err("Processing completed but no output frames were generated. Check if the video path is correct and the video contains processable content.".to_string());
-        }
-
-        // Send final frame update
+        // Final frame scan
         if let Ok(entries) = std::fs::read_dir(output_path) {
             let mut frames: Vec<PathBuf> = entries
                 .filter_map(|entry| entry.ok())
@@ -1577,15 +1737,13 @@ impl PipelineApp {
                 })
                 .collect();
             
-            // Sort frames by numerical order (extract frame number from filename)
             frames.sort_by(|a, b| {
                 let a_name = a.file_name().unwrap_or_default().to_string_lossy();
                 let b_name = b.file_name().unwrap_or_default().to_string_lossy();
                 
-                // Extract frame numbers for numerical comparison
                 let extract_frame_number = |name: &str| -> u32 {
                     if let Some(start) = name.find("frame_") {
-                        let after_prefix = &name[start + 6..]; // Skip "frame_"
+                        let after_prefix = &name[start + 6..];
                         if let Some(end) = after_prefix.find('.') {
                             let number_str = &after_prefix[..end];
                             return number_str.parse().unwrap_or(0);

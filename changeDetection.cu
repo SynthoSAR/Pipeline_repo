@@ -6,7 +6,11 @@
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/core/cuda.hpp>
 #include <iostream>
-#include <chrono> // Add this for timing
+#include <chrono>
+
+// Global variables to track average processing time
+static long long total_accumulated_time = 0;
+static int frame_count = 0;
 
 void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageData& imgDataNext, 
                          cv::cuda::GpuMat& changeMask, cv::cuda::GpuMat& outputAnnotated) {
@@ -28,9 +32,6 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
             return;
         }
 
-        // Start timing - placed immediately before the actual change detection processing starts
-        auto start_time = std::chrono::high_resolution_clock::now();
-        
         // Get GPU images
         cv::cuda::GpuMat prev_gpu = *imgDataPrev.binary_ref;
         cv::cuda::GpuMat curr_gpu = *imgDataCurr.binary_ref;
@@ -97,11 +98,16 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
         std::vector<std::vector<cv::Point>> contours;
         cv::findContours(filtered_roi_contours, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-        // End timing - placed immediately after the core change detection algorithm completes
+        // End timing and calculate average
         auto end_time = std::chrono::high_resolution_clock::now();
-        auto execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+        auto total_processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - imgDataCurr.processing_start_time).count();
         
-        // Step 6: Prepare visualization (not included in timing as this is just for display)
+        // Update average calculation
+        total_accumulated_time += total_processing_time;
+        frame_count++;
+        long long average_processing_time = total_accumulated_time / frame_count;
+        
+        // Step 6: Prepare visualization
         cv::Mat result_visual;
         
         // Check if original frame exists in imgDataCurr
@@ -148,10 +154,14 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
             }
         }
 
-        // Add execution time to the image
-        cv::putText(result_visual, "Execution time: " + std::to_string(execution_time) + " ms",
+        // Add current and average processing time to the image
+        cv::putText(result_visual, "Current: " + std::to_string(total_processing_time) + " ms",
                    cv::Point(10, 60), cv::FONT_HERSHEY_SIMPLEX, 0.7, 
                    cv::Scalar(255, 255, 255), 2);
+        
+        cv::putText(result_visual, "Avg Latency: " + std::to_string(average_processing_time) + " ms",
+                   cv::Point(10, 90), cv::FONT_HERSHEY_SIMPLEX, 0.7, 
+                   cv::Scalar(0, 255, 0), 2);
         
         // Add change count to the image
         cv::putText(result_visual, "Changes: " + std::to_string(change_count),
@@ -173,10 +183,17 @@ void applyChangeDetection(ImageData& imgDataPrev, ImageData& imgDataCurr, ImageD
         changeMask.upload(binary_mask);
         outputAnnotated.upload(result_visual);
 
-        // Log execution time to console
+        // Output structured data for Rust frontend to parse
+        std::cout << "METRICS|" << imgDataCurr.outputPath 
+                  << "|" << change_count 
+                  << "|" << total_processing_time 
+                  << "|" << average_processing_time << std::endl;
+                  
+        // Log execution time to console (for backward compatibility)
         std::cout << "Change detection completed for " << imgDataCurr.outputPath 
                   << " - Found " << change_count << " changes"
-                  << " - Execution time: " << execution_time << " ms" << std::endl;
+                  << " - Current time: " << total_processing_time << " ms"
+                  << " - Average latency: " << average_processing_time << " ms" << std::endl;
     }
     catch (const cv::Exception& e) {
         std::cerr << "OpenCV exception in change detection: " << e.what() << std::endl;

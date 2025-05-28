@@ -11,6 +11,9 @@ struct ImageData {
     cv::cuda::GpuMat* binary_ref = nullptr;   // Binarized GPU image 
     cv::cuda::GpuMat* annotated_ref = nullptr;   // Visual output with annotations
     std::string outputPath;
+
+    std::chrono::high_resolution_clock::time_point processing_start_time;
+
 };
 
 void loadImageToGPU(const cv::Mat& img, ImageData& imgData);
