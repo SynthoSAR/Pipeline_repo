@@ -1218,8 +1218,8 @@ impl PipelineApp {
     fn scan_existing_output_frames(&mut self) {
         // Check common output directories for existing frames
         let common_output_dirs = [
-            "/home/chavindu/Desktop/Pipeline_repo/output_frames",
-            "/home/chavindu/Desktop/Pipeline_repo/rust_output",
+            "/home/asith/Desktop/FYP/Testing_Pipeline_C/output_frames",
+            "/home/asith/Desktop/FYP/Testing_Pipeline_C/rust_output",
         ];
         
         for dir_path in &common_output_dirs {
@@ -1404,7 +1404,7 @@ impl PipelineApp {
             // Start the compilation process
             let mut child = match Command::new("bash")
                 .arg("-c")
-                .arg("cd /home/chavindu/Desktop/Pipeline_repo && nvcc -o main main.cu imageLoad.cu imageSave.cu noiseReduction.cu rotationCorrection.cu binarization.cu changeDetection.cu -I/usr/local/include/opencv4 -L/usr/local/lib -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_videoio -lopencv_imgproc -lopencv_cudaarithm -lopencv_cudaimgproc -lopencv_photo -lopencv_features2d -lopencv_calib3d -lopencv_cudawarping -lopencv_cudafeatures2d -lopencv_cudafilters -lopencv_cudaoptflow -lopencv_cudabgsegm -lopencv_cudalegacy -std=c++11")
+                .arg("cd /home/asith/Desktop/FYP/Testing_Pipeline_C && nvcc -o main main.cu imageLoad.cu imageSave.cu noiseReduction.cu rotationCorrection.cu binarization.cu changeDetection.cu -I/usr/local/include/opencv4 -L/usr/local/lib -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_videoio -lopencv_imgproc -lopencv_cudaarithm -lopencv_cudaimgproc -lopencv_photo -lopencv_features2d -lopencv_calib3d -lopencv_cudawarping -lopencv_cudafeatures2d -lopencv_cudafilters -lopencv_cudaoptflow -lopencv_cudabgsegm -lopencv_cudalegacy -std=c++11")
                 .spawn() {
                 Ok(child) => child,
                 Err(e) => {
@@ -1469,7 +1469,7 @@ impl PipelineApp {
             .arg(video_path.to_string_lossy().as_ref())
             .arg(output_path.to_string_lossy().as_ref())
             .arg(frame_rate.to_string())
-            .current_dir("/home/chavindu/Desktop/Pipeline_repo")
+            .current_dir("/home/asith/Desktop/FYP/Testing_Pipeline_C")
             .spawn()
             .map_err(|e| format!("Failed to start CUDA pipeline: {}", e))?;
 

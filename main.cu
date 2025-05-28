@@ -120,6 +120,7 @@ void noiseReductionThread() {
             isNoiseReductionDone = true; // Indicate noise reduction is done for at least one image
             isDataReady = false; // Reset data ready flag
             cv_rotation.notify_all(); // Notify saver thread to start saving
+            cv_loader.notify_all(); // Notify loader thread to load new images
         } else if (isProcessingDone) {
             break;
         }
@@ -152,6 +153,7 @@ void rotationCorrectionThread() {
             isRotationDone = true;
             isNoiseReductionDone = false;
             cv_binarization.notify_all();
+            cv_noise.notify_all(); // Notify noise reduction thread to reset
         } else if (isProcessingDone) {
             break;
         }
@@ -174,6 +176,7 @@ void binarizationThread() {
         isBinarizationDone = true;
         isRotationDone = false;
         cv_change.notify_all();
+        cv_rotation.notify_all(); // Notify rotation correction thread to reset
     }
 }
 
@@ -216,6 +219,7 @@ void changeDetectionThread() {
         isChangeDetectionDone = true;
         isBinarizationDone = false;
         cv_saver.notify_all();
+        cv_binarization.notify_all(); // Notify binarization thread to reset
     }
 }
 
@@ -234,7 +238,7 @@ void saverThread() {
             }
 	        isChangeDetectionDone = false;  // Reset flag for next batch
           //  isDataReady = false;
-            cv_loader.notify_all(); // Notify loader thread to load new images
+          cv_change.notify_all(); // Notify change detection thread to reset
         } else if (isProcessingDone) {
             break;
         }
