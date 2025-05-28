@@ -4,6 +4,7 @@ use std::process::Command;
 use std::sync::mpsc;
 use std::thread;
 use std::time::SystemTime;
+use std::collections::HashMap;
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
@@ -86,6 +87,19 @@ struct PipelineApp {
     frame_rate: f32,
     frame_rate_options: Vec<(String, f32)>,
     selected_frame_rate_index: usize,
+    // Slideshow fields
+    slideshow_active: bool,
+    slideshow_current_index: usize,
+    slideshow_last_change: std::time::Instant,
+    slideshow_interval: f32,
+    // Real-time frame monitoring
+    auto_slideshow_on_generation: bool,
+    last_frame_count: usize,
+    frame_monitor_last_check: std::time::Instant,
+    // Image preview
+    loaded_images: HashMap<PathBuf, egui::TextureHandle>,
+    preview_size: egui::Vec2,
+    show_preview: bool,
 }
 
 impl Default for PipelineApp {
@@ -119,6 +133,19 @@ impl Default for PipelineApp {
             frame_rate: 1.0, // Default to 1 FPS
             frame_rate_options,
             selected_frame_rate_index: 3, // Default to "1 FPS (Default)"
+            // Slideshow defaults
+            slideshow_active: false,
+            slideshow_current_index: 0,
+            slideshow_last_change: std::time::Instant::now(),
+            slideshow_interval: 2.0, // 2 seconds between slides
+            // Real-time monitoring defaults
+            auto_slideshow_on_generation: true, // Auto-start slideshow when generating
+            last_frame_count: 0,
+            frame_monitor_last_check: std::time::Instant::now(),
+            // Image preview defaults
+            loaded_images: HashMap::new(),
+            preview_size: egui::Vec2::new(800.0, 1000.0),
+            show_preview: true,
         }
     }
 }
@@ -156,6 +183,26 @@ enum ProcessingStatus {
 
 impl eframe::App for PipelineApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Real-time frame monitoring during processing
+        if matches!(self.processing_status, ProcessingStatus::Processing) || self.auto_slideshow_on_generation {
+            // Check for new frames every 500ms
+            if self.frame_monitor_last_check.elapsed().as_millis() > 500 {
+                self.check_for_new_frames();
+                self.frame_monitor_last_check = std::time::Instant::now();
+            }
+        }
+        
+        // Handle automatic slideshow timing (only for manual slideshow, not during preview)
+        if self.slideshow_active && !self.output_frames.is_empty() && !matches!(self.processing_status, ProcessingStatus::Processing) {
+            let elapsed = self.slideshow_last_change.elapsed().as_secs_f32();
+            if elapsed >= self.slideshow_interval {
+                self.advance_slideshow();
+                self.slideshow_last_change = std::time::Instant::now();
+            }
+            // Request continuous updates for smooth slideshow
+            ctx.request_repaint();
+        }
+        
         // Check for status updates
         if let Some(receiver) = &self.status_receiver {
             if let Ok(status) = receiver.try_recv() {
@@ -891,6 +938,216 @@ impl eframe::App for PipelineApp {
                                             });
                                     });
                                 
+                                // Slideshow controls
+                                ui.add_space(12.0);
+                                ui.separator();
+                                ui.add_space(8.0);
+                                
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Label::new(
+                                        egui::RichText::new("🎬 Slideshow")
+                                            .size(14.0)
+                                            .strong()
+                                    ));
+                                    
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        // Reset button
+                                        if ui.add(
+                                            egui::Button::new("⏮")
+                                                .min_size(egui::vec2(30.0, 25.0))
+                                        ).clicked() {
+                                            self.reset_slideshow();
+                                        }
+                                        
+                                        // Previous button
+                                        if ui.add(
+                                            egui::Button::new("⏪")
+                                                .min_size(egui::vec2(30.0, 25.0))
+                                        ).clicked() {
+                                            self.previous_slide();
+                                        }
+                                        
+                                        // Next button
+                                        if ui.add(
+                                            egui::Button::new("⏩")
+                                                .min_size(egui::vec2(30.0, 25.0))
+                                        ).clicked() {
+                                            self.advance_slideshow();
+                                        }
+                                        
+                                        // Play/Pause button
+                                        let play_pause_text = if self.slideshow_active { "⏸" } else { "▶" };
+                                        let play_pause_color = if self.slideshow_active {
+                                            egui::Color32::from_rgb(255, 100, 100)
+                                        } else {
+                                            egui::Color32::from_rgb(100, 255, 100)
+                                        };
+                                        
+                                        if ui.add(
+                                            egui::Button::new(
+                                                egui::RichText::new(play_pause_text)
+                                                    .color(play_pause_color)
+                                            )
+                                            .min_size(egui::vec2(40.0, 25.0))
+                                        ).clicked() {
+                                            self.toggle_slideshow();
+                                        }
+                                    });
+                                });
+                                
+                                // Slideshow speed control
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Label::new("Speed:"));
+                                    ui.add(egui::Slider::new(&mut self.slideshow_interval, 0.5..=10.0)
+                                        .text("seconds")
+                                        .step_by(0.5));
+                                    
+                                    if self.slideshow_active {
+                                        ui.add(egui::Label::new(
+                                            egui::RichText::new(format!("Frame {}/{}", 
+                                                self.slideshow_current_index + 1,
+                                                self.output_frames.len()
+                                            ))
+                                            .size(12.0)
+                                            .color(egui::Color32::from_rgb(120, 200, 120))
+                                        ));
+                                    }
+                                    
+                                    // Show real-time generation status
+                                    if matches!(self.processing_status, ProcessingStatus::Processing) {
+                                        ui.add(egui::Label::new(
+                                            egui::RichText::new("🔄 Generating...")
+                                                .size(11.0)
+                                                .color(egui::Color32::from_rgb(255, 200, 100))
+                                        ));
+                                    }
+                                });
+                                
+                                // Auto-slideshow toggle
+                                ui.add_space(8.0);
+                                ui.horizontal(|ui| {
+                                    let auto_text = if self.auto_slideshow_on_generation { 
+                                        "🔄 Auto-slideshow: ON" 
+                                    } else { 
+                                        "⏹️ Auto-slideshow: OFF" 
+                                    };
+                                    let auto_color = if self.auto_slideshow_on_generation {
+                                        egui::Color32::from_rgb(100, 255, 100)
+                                    } else {
+                                        egui::Color32::from_rgb(160, 160, 160)
+                                    };
+                                    
+                                    if ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new(auto_text)
+                                                .size(12.0)
+                                                .color(auto_color)
+                                        )
+                                        .min_size(egui::vec2(150.0, 25.0))
+                                    ).clicked() {
+                                        self.toggle_auto_slideshow();
+                                    }
+                                    
+                                    ui.add(egui::Label::new(
+                                        egui::RichText::new("(Auto-start after processing completes)")
+                                            .size(10.0)
+                                            .color(egui::Color32::from_rgb(140, 140, 140))
+                                            .italics()
+                                    ));
+                                });
+                                
+                                // Image Preview Section
+                                ui.add_space(12.0);
+                                ui.separator();
+                                ui.add_space(8.0);
+                                
+                                ui.horizontal(|ui| {
+                                    ui.add(egui::Label::new(
+                                        egui::RichText::new("🖼️ Live Preview")
+                                            .size(14.0)
+                                            .strong()
+                                    ));
+                                    
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        // Preview toggle
+                                        let preview_text = if self.show_preview { "🔍 Hide" } else { "🔍 Show" };
+                                        if ui.add(
+                                            egui::Button::new(preview_text)
+                                                .min_size(egui::vec2(60.0, 25.0))
+                                        ).clicked() {
+                                            self.show_preview = !self.show_preview;
+                                        }
+                                        
+                                        // Clear cache button
+                                        if ui.add(
+                                            egui::Button::new("🗑️ Clear Cache")
+                                                .min_size(egui::vec2(90.0, 25.0))
+                                        ).clicked() {
+                                            self.clear_image_cache();
+                                        }
+                                    });
+                                });
+                                
+                                // Show image preview if enabled and frame selected
+                                if self.show_preview {
+                                    if let Some(selected_frame) = &self.selected_frame {
+                                        ui.add_space(8.0);
+                                        
+                                        // Clone the frame path to avoid borrowing issues
+                                        let frame_path = selected_frame.clone();
+                                        let preview_size = self.preview_size;
+                                        
+                                        // Image display area
+                                        egui::Frame::none()
+                                            .fill(egui::Color32::from_rgb(20, 20, 25))
+                                            .rounding(8.0)
+                                            .inner_margin(egui::Margin::same(15.0))
+                                            .show(ui, |ui| {
+                                                if let Some(texture) = self.load_image_texture(&frame_path, ctx) {
+                                                    let image = egui::Image::from_texture(texture)
+                                                        .max_size(preview_size)
+                                                        .rounding(4.0);
+                                                    ui.add(image);
+                                                    
+                                                    // Image info
+                                                    ui.add_space(8.0);
+                                                    ui.add(egui::Label::new(
+                                                        egui::RichText::new(format!("📷 {} | Size: {}x{}", 
+                                                            frame_path.file_name().unwrap_or_default().to_string_lossy(),
+                                                            texture.size()[0],
+                                                            texture.size()[1]
+                                                        ))
+                                                        .size(11.0)
+                                                        .color(egui::Color32::from_rgb(160, 160, 160))
+                                                    ));
+                                                } else {
+                                                    ui.add(egui::Label::new(
+                                                        egui::RichText::new("❌ Failed to load image")
+                                                            .size(14.0)
+                                                            .color(egui::Color32::from_rgb(255, 100, 100))
+                                                    ));
+                                                }
+                                            });
+                                    } else {
+                                        ui.add_space(8.0);
+                                        ui.add(egui::Label::new(
+                                            egui::RichText::new("Select a frame to preview")
+                                                .size(12.0)
+                                                .color(egui::Color32::from_rgb(140, 140, 140))
+                                                .italics()
+                                        ));
+                                    }
+                                } else {
+                                    ui.add_space(4.0);
+                                    ui.add(egui::Label::new(
+                                        egui::RichText::new("Preview hidden")
+                                            .size(11.0)
+                                            .color(egui::Color32::from_rgb(120, 120, 120))
+                                            .italics()
+                                    ));
+                                }
+                                
                                 if let Some(selected) = &self.selected_frame {
                                     ui.add_space(8.0);
                                     ui.add(egui::Label::new(
@@ -1045,6 +1302,13 @@ impl PipelineApp {
             // Clear existing output frames when starting new processing
             self.output_frames.clear();
             self.selected_frame = None;
+            
+            // Prepare auto-slideshow if enabled
+            if self.auto_slideshow_on_generation {
+                self.slideshow_current_index = 0;
+                self.slideshow_last_change = std::time::Instant::now();
+                // Don't start slideshow yet - wait for first frame
+            }
 
             // Create channel for status updates
             let (sender, receiver) = mpsc::channel();
@@ -1339,5 +1603,114 @@ impl PipelineApp {
         }
 
         Ok(())
+    }
+
+    // Slideshow methods
+    fn advance_slideshow(&mut self) {
+        if !self.output_frames.is_empty() {
+            self.slideshow_current_index = (self.slideshow_current_index + 1) % self.output_frames.len();
+            self.selected_frame = Some(self.output_frames[self.slideshow_current_index].clone());
+        }
+    }
+
+    fn previous_slide(&mut self) {
+        if !self.output_frames.is_empty() {
+            if self.slideshow_current_index == 0 {
+                self.slideshow_current_index = self.output_frames.len() - 1;
+            } else {
+                self.slideshow_current_index -= 1;
+            }
+            self.selected_frame = Some(self.output_frames[self.slideshow_current_index].clone());
+        }
+    }
+
+    fn reset_slideshow(&mut self) {
+        self.slideshow_current_index = 0;
+        if !self.output_frames.is_empty() {
+            self.selected_frame = Some(self.output_frames[0].clone());
+        }
+        self.slideshow_last_change = std::time::Instant::now();
+    }
+
+    fn toggle_slideshow(&mut self) {
+        self.slideshow_active = !self.slideshow_active;
+        if self.slideshow_active {
+            self.slideshow_last_change = std::time::Instant::now();
+            // Ensure we have a frame selected
+            if self.selected_frame.is_none() && !self.output_frames.is_empty() {
+                self.selected_frame = Some(self.output_frames[self.slideshow_current_index].clone());
+            }
+        }
+    }
+
+    fn check_for_new_frames(&mut self) {
+        let old_count = self.output_frames.len();
+        self.scan_output_frames(); // Refresh frame list
+        
+        if self.output_frames.len() > old_count {
+            // New frames detected!
+            let new_frame_count = self.output_frames.len() - old_count;
+            println!("🆕 Detected {} new frame(s)! Total: {}", new_frame_count, self.output_frames.len());
+            
+            // Always enable preview when new frames are generated and stay on latest
+            self.show_preview = true;
+            
+            // Update selected frame to show the latest frame (no slideshow cycling during generation)
+            if !self.output_frames.is_empty() {
+                self.selected_frame = Some(self.output_frames[self.output_frames.len() - 1].clone());
+                self.slideshow_current_index = self.output_frames.len() - 1;
+            }
+            
+            // Only auto-start slideshow if not currently processing (for manual review after completion)
+            if self.auto_slideshow_on_generation && !self.slideshow_active && !self.output_frames.is_empty() 
+                && !matches!(self.processing_status, ProcessingStatus::Processing) {
+                self.slideshow_active = true;
+                self.slideshow_last_change = std::time::Instant::now();
+                println!("🎬 Auto-starting slideshow with {} frames (processing complete)", self.output_frames.len());
+            }
+        }
+    }
+
+    fn toggle_auto_slideshow(&mut self) {
+        self.auto_slideshow_on_generation = !self.auto_slideshow_on_generation;
+        if self.auto_slideshow_on_generation {
+            println!("🔄 Auto-slideshow enabled - will start automatically after processing completes");
+        } else {
+            println!("⏹️ Auto-slideshow disabled");
+        }
+    }
+
+    fn load_image_texture(&mut self, path: &PathBuf, ctx: &egui::Context) -> Option<&egui::TextureHandle> {
+        // Check if image is already loaded
+        if self.loaded_images.contains_key(path) {
+            return self.loaded_images.get(path);
+        }
+
+        // Try to load the image
+        if let Ok(image) = image::open(path) {
+            let size = [image.width() as usize, image.height() as usize];
+            let image_buffer = image.to_rgba8();
+            let pixels = image_buffer.as_flat_samples();
+            
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                size,
+                pixels.as_slice(),
+            );
+            
+            let texture = ctx.load_texture(
+                path.file_name().unwrap_or_default().to_string_lossy(),
+                color_image,
+                egui::TextureOptions::default()
+            );
+            
+            self.loaded_images.insert(path.clone(), texture);
+            return self.loaded_images.get(path);
+        }
+        
+        None
+    }
+
+    fn clear_image_cache(&mut self) {
+        self.loaded_images.clear();
     }
 }

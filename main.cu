@@ -66,7 +66,7 @@ void loaderThread(const std::string& videoPath, const std::string& outputFolder,
         cv_loader.wait(lock, [] { return !isDataReady; }); // Wait if data is already being processed
 
         sharedImageData.clear();
-        for (int i = 0; i < 3; ++i) {  // Load two frames per iteration
+        for (int i = 0; i < 3; ++i) {  // Load three frames per iteration
             if (cap.read(frame)) {
                 ImageData imgData;
                 loadImageToGPU(frame, imgData);
@@ -75,8 +75,14 @@ void loaderThread(const std::string& videoPath, const std::string& outputFolder,
                 sharedImageData.push_back(imgData);
                 // std::cout << "Frame " << frameCount << " loaded to GPU." << std::endl;
 
-                // Skip frames to get the next frame after 1 second
-                cap.set(cv::CAP_PROP_POS_FRAMES, cap.get(cv::CAP_PROP_POS_FRAMES) + frameInterval - 1);
+                // Skip frames to get the next frame based on desired frame rate
+                // Only skip after reading the frame, and adjust for the fact we already read one
+                for (int skip = 0; skip < frameInterval - 1; skip++) {
+                    cv::Mat tempFrame;
+                    if (!cap.read(tempFrame)) {
+                        break; // No more frames to skip
+                    }
+                }
             } else {
                 break;  // Exit loop if no more frames
             }
