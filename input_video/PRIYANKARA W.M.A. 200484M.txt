@@ -1,0 +1,13 @@
+Student: PRIYANKARA W.M.A. 200484M
+Notebook compile error
+Final score 0 out of 40
+Execution time 245s
+
+A cell timed out while it was being executed, after 240 seconds.
+The message was: Cell execution timed out.
+Here is a preview of the cell contents:
+-------------------
+['import numpy as np', 'import matplotlib.pyplot as plt', 'import random', 'from keras.preprocessing.image import load_img', 'import keras']
+...
+['student.record_answer("testcase_Q4Conv", [lena_kernel_1_maxpool, lena_kernel_2_avgpool, lena_kernel_3_maxpool, lena_kernel_4_avgpool])', 'student.record_answer("testcase_Q4Ans", [Ans_Kernel_1, Ans_Kernel_2, Ans_Kernel_3, Ans_Kernel_4])', 'student.record_answer("testcase_Sec2", predict)', '', 'student.save_answers()']
+-------------------
