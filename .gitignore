@@ -4,3 +4,4 @@ output_images/*
 rust_output/*
 target/
 .idea/
+input_video/*
