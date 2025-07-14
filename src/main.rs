@@ -473,39 +473,39 @@ impl eframe::App for PipelineApp {
                             ui.add_space(12.0);
                             
                             // Frame rate selection dropdown
-                            ui.horizontal(|ui| {
-                                ui.add(egui::Label::new(
-                                    egui::RichText::new("⚡ Frame Rate (FPS):")
-                                        .size(14.0)
-                                        .strong()
-                                ));
-                                ui.add_space(8.0);
+                            // ui.horizontal(|ui| {
+                            //     ui.add(egui::Label::new(
+                            //         egui::RichText::new("⚡ Frame Rate (FPS):")
+                            //             .size(14.0)
+                            //             .strong()
+                            //     ));
+                            //     ui.add_space(8.0);
                                 
-                                // Frame rate dropdown
-                                let selected_text = &self.frame_rate_options[self.selected_frame_rate_index].0;
-                                egui::ComboBox::from_label("")
-                                    .selected_text(selected_text)
-                                    .width(200.0)
-                                    .show_ui(ui, |ui| {
-                                        for (i, (display_text, _value)) in self.frame_rate_options.iter().enumerate() {
-                                            let response = ui.selectable_value(&mut self.selected_frame_rate_index, i, display_text);
-                                            if response.clicked() {
-                                                // Update frame_rate when selection changes
-                                                self.frame_rate = self.frame_rate_options[i].1;
-                                            }
-                                        }
-                                    });
-                            });
+                            //     // Frame rate dropdown
+                            //     let selected_text = &self.frame_rate_options[self.selected_frame_rate_index].0;
+                            //     egui::ComboBox::from_label("")
+                            //         .selected_text(selected_text)
+                            //         .width(200.0)
+                            //         .show_ui(ui, |ui| {
+                            //             for (i, (display_text, _value)) in self.frame_rate_options.iter().enumerate() {
+                            //                 let response = ui.selectable_value(&mut self.selected_frame_rate_index, i, display_text);
+                            //                 if response.clicked() {
+                            //                     // Update frame_rate when selection changes
+                            //                     self.frame_rate = self.frame_rate_options[i].1;
+                            //                 }
+                            //             }
+                            //         });
+                            // });
                             
-                            ui.add_space(4.0);
-                            ui.add(egui::Label::new(
-                                egui::RichText::new("📝 Controls how many frames per second are extracted from the video")
-                                    .size(12.0)
-                                    .color(egui::Color32::from_rgb(160, 160, 160))
-                                    .italics()
-                            ));
+                            // ui.add_space(4.0);
+                            // ui.add(egui::Label::new(
+                            //     egui::RichText::new("📝 Controls how many frames per second are extracted from the video")
+                            //         .size(12.0)
+                            //         .color(egui::Color32::from_rgb(160, 160, 160))
+                            //         .italics()
+                            // ));
                             
-                            ui.add_space(12.0);
+                            // ui.add_space(12.0);
                             
                             let can_process = self.selected_video_path.is_some() 
                                 && self.output_folder_path.is_some() 
@@ -1218,8 +1218,7 @@ impl PipelineApp {
     fn scan_existing_output_frames(&mut self) {
         // Check common output directories for existing frames
         let common_output_dirs = [
-            "/home/chavindu/Desktop/Pipeline_repo/output_frames",
-            "/home/chavindu/Desktop/Pipeline_repo/rust_output",
+            "/home/asith/Desktop/FYP/Testing_Pipeline_C/rust_output",
         ];
         
         for dir_path in &common_output_dirs {
@@ -1404,7 +1403,7 @@ impl PipelineApp {
             // Start the compilation process
             let mut child = match Command::new("bash")
                 .arg("-c")
-                .arg("cd /home/chavindu/Desktop/Pipeline_repo && nvcc -o main main.cu imageLoad.cu imageSave.cu noiseReduction.cu rotationCorrection.cu binarization.cu changeDetection.cu -I/usr/local/include/opencv4 -L/usr/local/lib -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_videoio -lopencv_imgproc -lopencv_cudaarithm -lopencv_cudaimgproc -lopencv_photo -lopencv_features2d -lopencv_calib3d -lopencv_cudawarping -lopencv_cudafeatures2d -lopencv_cudafilters -lopencv_cudaoptflow -lopencv_cudabgsegm -lopencv_cudalegacy -std=c++11")
+                .arg("cd /home/asith/Desktop/FYP/Testing_Pipeline_C && nvcc -o main main.cu imageLoad.cu imageSave.cu noiseReduction.cu rotationCorrection.cu binarization.cu changeDetection.cu -I/usr/local/include/opencv4 -L/usr/local/lib -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_videoio -lopencv_imgproc -lopencv_cudaarithm -lopencv_cudaimgproc -lopencv_photo -lopencv_features2d -lopencv_calib3d -lopencv_cudawarping -lopencv_cudafeatures2d -lopencv_cudafilters -lopencv_cudaoptflow -lopencv_cudabgsegm -lopencv_cudalegacy -std=c++11")
                 .spawn() {
                 Ok(child) => child,
                 Err(e) => {
@@ -1468,8 +1467,8 @@ impl PipelineApp {
         let mut child = Command::new("./main")
             .arg(video_path.to_string_lossy().as_ref())
             .arg(output_path.to_string_lossy().as_ref())
-            .arg(frame_rate.to_string())
-            .current_dir("/home/chavindu/Desktop/Pipeline_repo")
+            .arg("4.0")
+            .current_dir("/home/asith/Desktop/FYP/Testing_Pipeline_C")
             .spawn()
             .map_err(|e| format!("Failed to start CUDA pipeline: {}", e))?;
 
