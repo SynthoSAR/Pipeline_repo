@@ -14,23 +14,17 @@
 }
 
 void saveImageFromGPU(const ImageData& imgData) {
-    if (!imgData.rotation_ref) {
-        std::cerr << "Error: imgData.ref is null!" << std::endl;
-        return;
-    }
-    if (imgData.rotation_ref->empty()) {
-        std::cerr << "Error: GPU Mat is empty!" << std::endl;
-        return;
+    if (imgData.annotated_ref &&  !imgData.annotated_ref->empty()) {
+        cv::Mat img;
+        imgData.annotated_ref->download(img);
+        
+        if (!cv::imwrite(imgData.outputPath, img)) {
+            std::cerr << "Failed to save the image to: " << imgData.outputPath << std::endl;
+            exit(EXIT_FAILURE);
+        }
+        std::cerr << "No ERROR , Process Correctly" << std::endl;
     }
     
-    cv::Mat img;
-    imgData.rotation_ref->download(img);
-    
-    if (!cv::imwrite(imgData.outputPath, img)) {
-        std::cerr << "Failed to save the image to: " << imgData.outputPath << std::endl;
-        exit(EXIT_FAILURE);
-    }
-
 }
 
 void freeGPUData(ImageData& imgData) {
@@ -45,9 +39,13 @@ void freeGPUData(ImageData& imgData) {
         imgData.denoised_ref = nullptr;
     }
 
-    if (imgData.rotation_ref) {
-        delete imgData.rotation_ref;
-        imgData.rotation_ref = nullptr;
-    }
+   // if (imgData.rotation_ref) {
+    //    delete imgData.rotation_ref;
+     //   imgData.rotation_ref = nullptr;
+   // }
+   // if (imgData.binary_ref != nullptr) {
+    //    delete imgData.binary_ref;
+     //   imgData.binary_ref = nullptr;
+    //}
 }
 

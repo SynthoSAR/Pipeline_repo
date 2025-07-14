@@ -1,3 +1,7 @@
 input_images/*
 output_frames/*
 output_images/*
+rust_output/*
+target/
+.idea/
+input_video/*
